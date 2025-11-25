@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build \"C:\\Users\\User\\Desktop\\Poddle JTN\\Research\\loyality agent 2.0\\loyalityAgent2.0\\loyalityAgent2.0\\loyalityAgent2.0.csproj\")",
+      "Bash(dotnet clean:*)",
+      "Bash(dotnet add:*)",
+      "Bash(dotnet build:*)",
+      "Bash(taskkill:*)",
+      "Bash(dotnet ef migrations:*)",
+      "Bash(dotnet ef database update:*)",
+      "Bash(start cmd /k \"dotnet run --launch-profile https\")"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

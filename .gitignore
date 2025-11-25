@@ -1,0 +1,106 @@
+##############################
+#       VISUAL STUDIO        #
+##############################
+.vs/
+*.suo
+*.user
+*.cache
+*.userosscache
+*.sln.docstates
+
+# Build results
+bin/
+obj/
+Debug/
+Release/
+x64/
+x86/
+*.log
+
+# Auto generated db files
+*.dbmdl
+*.bak
+
+##############################
+#      DOTNET PROJECTS       #
+##############################
+project.lock.json
+project.fragment.lock.json
+artifacts/
+*.pdb
+*.mdb
+
+# ASP.NET publish
+wwwroot/
+
+##############################
+#          ANGULAR           #
+##############################
+/dist/
+/out-tsc/
+/tmp/
+/coverage/
+/node_modules/
+/package-lock.json
+
+# Angular environment files
+src/environments/environment.ts
+src/environments/environment.prod.ts
+
+##############################
+#          NODE JS           #
+##############################
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+##############################
+#           FLUTTER          #
+##############################
+# Flutter/Dart/Pub
+.dart_tool/
+.packages
+.pub/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+generated_plugin_registrant.dart
+pubspec.lock
+
+# Android
+**/android/.gradle/
+**/android/local.properties
+**/android/app/build/
+gradlew
+gradlew.bat
+
+# iOS
+**/ios/Pods/
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/App.framework
+**/ios/Flutter/Flutter.framework
+**/ios/Runner/GeneratedPluginRegistrant.*
+
+##############################
+#           VS CODE          #
+##############################
+.vscode/
+*.code-workspace
+
+##############################
+#        WINDOWS FILES       #
+##############################
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+##############################
+#          OTHERS            #
+##############################
+*.tmp
+*.bak
+*.swp
+*.DS_Store
+.idea/

@@ -1,0 +1,50 @@
+### Health Check
+GET https://localhost:7xxx/api/agent/health
+
+### Query 1: General Knowledge
+POST https://localhost:7xxx/api/agent/query
+Content-Type: application/json
+
+{
+  "query": "What is the height of Burj Khalifa?"
+}
+
+### Query 2: Recent Events
+POST https://localhost:7xxx/api/agent/query
+Content-Type: application/json
+
+{
+  "query": "Who won the Nobel Prize in Physics in 2024?"
+}
+
+### Query 3: Business Information
+POST https://localhost:7xxx/api/agent/query
+Content-Type: application/json
+
+{
+  "query": "Find details about Neil Moodie Studio located at postal code E1 6EA - what is their business model?"
+}
+
+### Query 4: Technology
+POST https://localhost:7xxx/api/agent/query
+Content-Type: application/json
+
+{
+  "query": "What are the latest developments in quantum computing?"
+}
+
+### Query 5: Travel Information
+POST https://localhost:7xxx/api/agent/query
+Content-Type: application/json
+
+{
+  "query": "What are the top restaurants in Paris according to recent reviews?"
+}
+
+### Error Case: Empty Query
+POST https://localhost:7xxx/api/agent/query
+Content-Type: application/json
+
+{
+  "query": ""
+}

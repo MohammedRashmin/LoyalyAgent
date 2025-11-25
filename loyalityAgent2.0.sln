@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36511.14 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "loyalityAgent2.0", "loyalityAgent2.0\loyalityAgent2.0.csproj", "{6E6F10BE-02FA-4234-91E4-2F7CC16D4023}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{6E6F10BE-02FA-4234-91E4-2F7CC16D4023}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6E6F10BE-02FA-4234-91E4-2F7CC16D4023}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6E6F10BE-02FA-4234-91E4-2F7CC16D4023}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6E6F10BE-02FA-4234-91E4-2F7CC16D4023}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {11591BFD-A577-4BD3-A873-145A76E8F480}
+	EndGlobalSection
+EndGlobal
