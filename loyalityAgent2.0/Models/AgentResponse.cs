@@ -7,7 +7,7 @@ namespace loyalityAgent2._0.Models
         public LoyaltyTierAnalysis? LoyaltyTierAnalysis { get; set; }
         
         // Explicit 4 Tiers (ALWAYS filled)
-        public WelcomeGift WelcomeGift { get; set; } = new();
+        public WelcomeGiftResponse WelcomeGift { get; set; } = new();
         public LoyaltyTierReward BronzeTier { get; set; } = new();
         public LoyaltyTierReward SilverTier { get; set; } = new();
         public LoyaltyTierReward GoldTier { get; set; } = new();

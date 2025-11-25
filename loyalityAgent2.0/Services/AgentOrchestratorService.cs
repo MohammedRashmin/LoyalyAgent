@@ -192,7 +192,7 @@ namespace loyalityAgent2._0.Services
                 {
                     Success = false,
                     ErrorMessage = ex.Message,
-                    WelcomeGift = new WelcomeGift { ItemName = "Welcome Gift", ItemPriceGBP = 2.00m, Description = "Welcome gift", IsFree = true },
+                    WelcomeGift = new WelcomeGiftResponse { ItemName = "Welcome Gift", ItemPriceGBP = 2.00m, Description = "Welcome gift", IsFree = true },
                     BronzeTier = CreateFallbackTier(LoyaltyTier.Bronze, 3, 10m),
                     SilverTier = CreateFallbackTier(LoyaltyTier.Silver, 5, 20m),
                     GoldTier = CreateFallbackTier(LoyaltyTier.Gold, 7, 40m)

@@ -1074,7 +1074,7 @@ Use realistic pricing for {address} area.";
             }
         }
 
-        public async Task<WelcomeGift> GenerateWelcomeGiftAsync(ProductAnalysisResult productAnalysis, ServiceAnalysisResult? serviceAnalysis, BusinessAttributes businessAttributes, decimal minimumSpent)
+        public async Task<WelcomeGiftResponse> GenerateWelcomeGiftAsync(ProductAnalysisResult productAnalysis, ServiceAnalysisResult? serviceAnalysis, BusinessAttributes businessAttributes, decimal minimumSpent)
         {
             try
             {
@@ -1101,7 +1101,7 @@ REASONING: [explain why]";
 
                 if (selectedMatch.Success && decimal.TryParse(selectedMatch.Groups[2].Value, out var price))
                 {
-                    return new WelcomeGift
+                    return new WelcomeGiftResponse
                     {
                         ItemName = selectedMatch.Groups[1].Value.Trim(),
                         ItemPriceGBP = price,
@@ -1119,7 +1119,7 @@ REASONING: [explain why]";
 
                 if (affordableProduct != null)
                 {
-                    return new WelcomeGift
+                    return new WelcomeGiftResponse
                     {
                         ItemName = affordableProduct.Name,
                         ItemPriceGBP = affordableProduct.PriceGBP,
@@ -1130,7 +1130,7 @@ REASONING: [explain why]";
                 }
 
                 // Ultimate fallback
-                return new WelcomeGift
+                return new WelcomeGiftResponse
                 {
                     ItemName = "Welcome Gift",
                     ItemPriceGBP = 2.00m,
@@ -1142,7 +1142,7 @@ REASONING: [explain why]";
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error generating welcome gift");
-                return new WelcomeGift
+                return new WelcomeGiftResponse
                 {
                     ItemName = "Welcome Gift",
                     ItemPriceGBP = 2.00m,
@@ -1308,33 +1308,16 @@ REASONING: [explanation]";
             };
         }
 
-        private LoyaltyTierReward CreateFallbackTierReward(LoyaltyTier tier, int tokens, decimal discountPercentage)
-        {
-            return new LoyaltyTierReward
-            {
-                Tier = tier,
-                RequiredTokens = tokens,
-                RewardOptions = new List<TierRewardOption>(),
-                FallbackDiscount = new TierFallbackDiscount
-                {
-                    DiscountPercentage = discountPercentage,
-                    Description = $"Get {discountPercentage}% off your next purchase",
-                    Reasoning = "Default tier discount"
-                },
-                Reasoning = $"{tier} tier: {tokens} tokens for {discountPercentage}% discount"
-            };
-        }
-
-        private string GetTierDescription(TierReward? tierReward)
+        private string GetTierDescription(Models.TierReward? tierReward)
         {
             if (tierReward == null) return "None";
-            if (tierReward.RewardOptions.Any())
+            if (tierReward.RewardItems.Any())
             {
-                return string.Join(", ", tierReward.RewardOptions.Select(r => $"{r.ItemName} (£{r.ItemValueGBP})"));
+                return string.Join(", ", tierReward.RewardItems.Select(r => $"{r.ItemName} (£{r.ItemValueGBP})"));
             }
-            if (tierReward.FallbackDiscount != null)
+            if (tierReward.FallbackDiscountPercentage.HasValue)
             {
-                return $"{tierReward.FallbackDiscount.DiscountPercentage}% discount";
+                return $"{tierReward.FallbackDiscountPercentage}% discount";
             }
             return "None";
         }
