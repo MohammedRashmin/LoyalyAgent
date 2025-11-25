@@ -1,0 +1,1238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Business Loyalty Analysis</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #1a1a1a;
+            line-height: 1.6;
+            height: 100vh;
+            overflow: hidden;
+        }
+        /* Auth Screen */
+        .auth-screen {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+        }
+
+        .auth-screen.hidden {
+            display: none;
+        }
+
+        .auth-container {
+            width: 100%;
+            max-width: 420px;
+            background: #fff;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+            animation: slideUp 0.4s ease-out;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .auth-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            padding: 32px 24px;
+            text-align: center;
+        }
+
+        .auth-header h1 {
+            font-size: 1.75em;
+            font-weight: 700;
+            margin-bottom: 8px;
+            letter-spacing: -0.02em;
+        }
+
+        .auth-header p {
+            font-size: 0.9em;
+            opacity: 0.95;
+        }
+
+        .auth-body {
+            padding: 32px;
+        }
+
+        .tabs {
+            display: flex;
+            background: #f5f5f5;
+            border-radius: 8px;
+            padding: 4px;
+            margin-bottom: 24px;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 10px 16px;
+            background: transparent;
+            border: none;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.3s ease;
+            color: #666;
+        }
+
+        .tab.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        }
+
+        .form-content {
+            display: none;
+        }
+
+        .form-content.active {
+            display: block;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .error-message {
+            background: #fee;
+            border: 1px solid #fcc;
+            color: #c33;
+            padding: 12px 16px;
+            margin-bottom: 20px;
+            font-size: 0.9em;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .error-message.show {
+            display: block;
+            animation: shake 0.4s ease-out;
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-8px); }
+            75% { transform: translateX(8px); }
+        }
+
+        /* Main App */
+        .main-app {
+            display: none;
+            flex-direction: column;
+            height: 100vh;
+            background: #f8f9fa;
+        }
+
+        .main-app.show {
+            display: flex;
+        }
+
+        .container {
+            max-width: 100%;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 32px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .header-left h1 {
+            font-size: 1.75em;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 4px;
+            letter-spacing: -0.02em;
+        }
+
+        .header-left p {
+            font-size: 0.9em;
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .user-info {
+            font-size: 0.9em;
+            color: rgba(255, 255, 255, 0.9);
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 20px;
+        }
+
+        .logout-btn {
+            padding: 10px 20px;
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .logout-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-1px);
+        }
+
+        .main-layout {
+            display: grid;
+            grid-template-columns: 360px 1fr 1fr;
+            gap: 0;
+            height: calc(100vh - 90px);
+            overflow: hidden;
+            background: #f8f9fa;
+        }
+
+        .panel {
+            background: #fff;
+            border-right: 1px solid #e8e9ea;
+            overflow-y: auto;
+            height: 100%;
+            box-shadow: 2px 0 8px rgba(0, 0, 0, 0.04);
+        }
+
+        .panel:last-child {
+            border-right: none;
+        }
+
+        .panel-header {
+            position: sticky;
+            top: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            padding: 16px 20px;
+            font-size: 0.85em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            z-index: 10;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .panel-content {
+            padding: 24px;
+        }
+
+        /* Form Styles */
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 600;
+            font-size: 0.85em;
+            letter-spacing: 0.02em;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            background: #fff;
+            font-size: 14px;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            font-family: inherit;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .form-group small {
+            display: block;
+            margin-top: 6px;
+            color: #888;
+            font-size: 0.8em;
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            border: none;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-family: inherit;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+
+        .submit-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4);
+        }
+
+        .submit-btn:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        .submit-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
+        }
+
+        .connection-status {
+            margin-bottom: 20px;
+            padding: 12px;
+            text-align: center;
+            font-weight: 600;
+            font-size: 0.8em;
+            border-radius: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            transition: all 0.3s ease;
+        }
+
+        /* .connection-status.connected {
+            background: #d4edda;
+            border: 2px solid #28a745;
+            color: #155724;
+        }
+
+        .connection-status.disconnected {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            color: #856404;
+        } */
+
+        /* Workflow Styles */
+        .workflow-step {
+            background: #fff;
+            border-left: 4px solid #667eea;
+            padding: 14px 16px;
+            margin-bottom: 12px;
+            font-size: 0.85em;
+            border-radius: 0 8px 8px 0;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            transition: all 0.3s ease;
+        }
+
+        .workflow-step:hover {
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            transform: translateX(2px);
+        }
+
+        .workflow-step.processing {
+            border-left-color: #ffc107;
+            background: #fffbf0;
+        }
+
+        .workflow-step.completed {
+            border-left-color: #28a745;
+            background: #f0fff4;
+        }
+
+        .step-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+
+        .step-title {
+            font-weight: 600;
+            color: #333;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+            font-size: 0.9em;
+        }
+
+        .step-time {
+            font-size: 0.8em;
+            color: #888;
+            font-family: 'Courier New', monospace;
+            background: #f5f5f5;
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+
+        .step-message {
+            color: #555;
+            line-height: 1.5;
+            font-size: 0.9em;
+        }
+
+        .empty-state, .no-results {
+            text-align: center;
+            color: #999;
+            padding: 60px 20px;
+            font-size: 0.9em;
+        }
+
+        .empty-state::before, .no-results::before {
+            content: "📋";
+            display: block;
+            font-size: 3em;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        /* Results Styles */
+        .results-container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .result-section {
+            border: none;
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .result-section:hover {
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+            transform: translateY(-2px);
+        }
+
+        .result-section h3 {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            padding: 16px 20px;
+            font-size: 0.9em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .result-body {
+            padding: 20px;
+        }
+
+        .offer-highlight {
+            background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%);
+            border-left: 4px solid #667eea;
+            padding: 16px;
+            margin-bottom: 16px;
+            font-size: 1em;
+            font-weight: 600;
+            line-height: 1.6;
+            border-radius: 8px;
+            color: #333;
+        }
+
+        .offer-item {
+            margin-bottom: 16px;
+            font-size: 0.9em;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .offer-label {
+            font-weight: 600;
+            color: #667eea;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            margin-bottom: 6px;
+            font-size: 0.8em;
+        }
+
+        .offer-value {
+            color: #333;
+            line-height: 1.5;
+            font-size: 0.95em;
+        }
+
+        .token-info {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            padding: 14px;
+            margin-bottom: 16px;
+            text-align: center;
+            font-size: 0.85em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        }
+
+        .tier-card {
+            border: 2px solid #e8e9ea;
+            margin-bottom: 16px;
+            background: #fff;
+            font-size: 0.9em;
+            border-radius: 10px;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .tier-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+        }
+
+        .tier-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 16px;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-bottom: 2px solid #e8e9ea;
+        }
+
+        .tier-name {
+            font-weight: 700;
+            color: #333;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            font-size: 0.95em;
+        }
+
+        .tier-tokens {
+            font-size: 0.9em;
+            color: #667eea;
+            font-weight: 700;
+            background: rgba(102, 126, 234, 0.1);
+            padding: 4px 12px;
+            border-radius: 12px;
+        }
+
+        .tier-body {
+            padding: 16px;
+        }
+
+        .reward-section {
+            margin-bottom: 14px;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .reward-label {
+            font-weight: 700;
+            font-size: 0.85em;
+            color: #667eea;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        .reward-list {
+            padding-left: 20px;
+            margin: 0;
+        }
+
+        .reward-list li {
+            color: #333;
+            margin-bottom: 6px;
+            font-size: 0.95em;
+            line-height: 1.5;
+            list-style-type: "✓ ";
+        }
+
+        .reward-value {
+            color: #333;
+            font-size: 0.95em;
+            line-height: 1.5;
+        }
+
+        .workflow-path-display {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 2px solid #e8e9ea;
+            font-size: 0.75em;
+            color: #888;
+            font-family: 'Courier New', monospace;
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 6px;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 0.8s linear infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .panel::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .panel::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        .panel::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 4px;
+        }
+
+        .panel::-webkit-scrollbar-thumb:hover {
+            background: #a1a1a1;
+        }
+
+        @media (max-width: 1200px) {
+            .main-layout {
+                grid-template-columns: 1fr;
+                height: auto;
+            }
+
+            body {
+                overflow: auto;
+                height: auto;
+            }
+
+            .container {
+                height: auto;
+            }
+
+            .panel {
+                border-right: none;
+                border-bottom: 1px solid #e0e0e0;
+                height: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Authentication Screen -->
+    <div class="auth-screen" id="authScreen">
+        <div class="auth-container">
+            <div class="auth-header">
+                <h1>Business Loyalty Analysis</h1>
+                <p>Login or Create Account</p>
+            </div>
+
+            <div class="auth-body">
+                <div class="tabs">
+                    <button class="tab active" onclick="switchTab('login')">Login</button>
+                    <button class="tab" onclick="switchTab('register')">Register</button>
+                </div>
+
+                <div id="errorMessage" class="error-message"></div>
+
+                <!-- Login Form -->
+                <div id="loginForm" class="form-content active">
+                    <form onsubmit="handleLogin(event)">
+                        <div class="form-group">
+                            <label for="loginEmail">Email</label>
+                            <input type="email" id="loginEmail" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="loginPassword">Password</label>
+                            <input type="password" id="loginPassword" required>
+                        </div>
+
+                        <button type="submit" class="submit-btn" id="loginBtn">
+                            <span id="loginBtnText">Login</span>
+                            <span id="loginBtnSpinner" style="display:none;"><span class="spinner"></span>Processing</span>
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Register Form -->
+                <div id="registerForm" class="form-content">
+                    <form onsubmit="handleRegister(event)">
+                        <div class="form-group">
+                            <label for="registerEmail">Email</label>
+                            <input type="email" id="registerEmail" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="registerPassword">Password</label>
+                            <input type="password" id="registerPassword" minlength="6" required>
+                            <small>Minimum 6 characters</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="registerApiKey">Google AI API Key</label>
+                            <input type="text" id="registerApiKey" required>
+                            <small>Get your API key from Google AI Studio</small>
+                        </div>
+
+                        <button type="submit" class="submit-btn" id="registerBtn">
+                            <span id="registerBtnText">Create Account</span>
+                            <span id="registerBtnSpinner" style="display:none;"><span class="spinner"></span>Processing</span>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Application -->
+    <div class="main-app" id="mainApp">
+        <div class="container">
+            <div class="header">
+                <div class="header-left">
+                    <h1>Business Loyalty Analysis</h1>
+                    <p>AI-powered welcome gift and loyalty tier recommendations</p>
+                </div>
+                <div class="header-right">
+                    <div class="user-info" id="userInfo"></div>
+                    <button class="logout-btn" onclick="logout()">Logout</button>
+                </div>
+            </div>
+
+            <div class="main-layout">
+                <!-- Input Panel -->
+                <div class="panel">
+                    <div class="panel-header">Business Details</div>
+                    <div class="panel-content">
+                        <!-- <div class="connection-status disconnected" id="connectionStatus">
+                            Connecting...
+                        </div> -->
+
+                        <form id="businessForm">
+                            <div class="form-group">
+                                <label for="businessName">Business Name</label>
+                                <input type="text" id="businessName" placeholder="Enter business name" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="category">Category</label>
+                                <input type="text" id="category" placeholder="Coffee Shop, Salon..." required>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="fullAddress">Address</label>
+                                <input type="text" id="fullAddress" placeholder="Street, City, Postcode" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="minimumSpent">Spend per Token (£)</label>
+                                <input type="number" id="minimumSpent" placeholder="25.00" step="0.01" min="0" value="25" required>
+                                <small>Customer spends this to earn 1 token</small>
+                            </div>
+
+                            <button type="submit" class="submit-btn" id="submitBtn">
+                                <span id="btnText">Analyze</span>
+                                <span id="btnSpinner" style="display:none;"><span class="spinner"></span>Processing</span>
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Workflow Panel -->
+                <div class="panel">
+                    <div class="panel-header">Analysis Progress</div>
+                    <div class="panel-content">
+                        <div id="workflowPath">
+                            <div class="empty-state">
+                                Enter details and click Analyze
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results Panel -->
+                <div class="panel">
+                    <div class="panel-header">Results</div>
+                    <div class="panel-content">
+                        <div id="resultsContainer">
+                            <div class="no-results">
+                                Results will appear here after analysis
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let connection;
+        let isProcessing = false;
+        let userId = null;
+        let userEmail = null;
+
+        function getBaseUrl() {
+            return "https://localhost:7277";
+        }
+
+        function initApp() {
+            userId = localStorage.getItem('userId');
+            userEmail = localStorage.getItem('userEmail');
+
+            if (userId) {
+                showMainApp();
+                initializeSignalR();
+            } else {
+                showAuthScreen();
+            }
+        }
+
+        function showAuthScreen() {
+            document.getElementById('authScreen').classList.remove('hidden');
+            document.getElementById('mainApp').classList.remove('show');
+        }
+
+        function showMainApp() {
+            document.getElementById('authScreen').classList.add('hidden');
+            document.getElementById('mainApp').classList.add('show');
+            document.getElementById('userInfo').textContent = userEmail || 'User';
+        }
+
+        function logout() {
+            localStorage.removeItem('userId');
+            localStorage.removeItem('userEmail');
+            userId = null;
+            userEmail = null;
+            showAuthScreen();
+            if (connection) {
+                connection.stop();
+            }
+        }
+
+        // Auth Functions
+        function switchTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.form-content').forEach(f => f.classList.remove('active'));
+
+            if (tab === 'login') {
+                document.querySelector('.tab:first-child').classList.add('active');
+                document.getElementById('loginForm').classList.add('active');
+            } else {
+                document.querySelector('.tab:last-child').classList.add('active');
+                document.getElementById('registerForm').classList.add('active');
+            }
+
+            hideError();
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.classList.add('show');
+        }
+
+        function hideError() {
+            document.getElementById('errorMessage').classList.remove('show');
+        }
+
+        function setAuthLoading(form, loading) {
+            const btn = document.getElementById(form === 'login' ? 'loginBtn' : 'registerBtn');
+            const textSpan = document.getElementById(form === 'login' ? 'loginBtnText' : 'registerBtnText');
+            const spinnerSpan = document.getElementById(form === 'login' ? 'loginBtnSpinner' : 'registerBtnSpinner');
+
+            btn.disabled = loading;
+            textSpan.style.display = loading ? 'none' : 'inline';
+            spinnerSpan.style.display = loading ? 'inline' : 'none';
+        }
+
+        async function handleLogin(event) {
+            event.preventDefault();
+            hideError();
+            setAuthLoading('login', true);
+
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+
+            try {
+                const response = await fetch(getBaseUrl() + '/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+
+                const result = await response.json();
+
+                if (result.success || result.Success) {
+                    userId = result.userId || result.UserId;
+                    userEmail = email;
+                    localStorage.setItem('userId', userId);
+                    localStorage.setItem('userEmail', email);
+                    showMainApp();
+                    initializeSignalR();
+                } else {
+                    showError(result.message || result.Message || 'Login failed');
+                }
+            } catch (error) {
+                showError('Connection error. Please try again.');
+            } finally {
+                setAuthLoading('login', false);
+            }
+        }
+
+        async function handleRegister(event) {
+            event.preventDefault();
+            hideError();
+            setAuthLoading('register', true);
+
+            const email = document.getElementById('registerEmail').value;
+            const password = document.getElementById('registerPassword').value;
+            const googleApiKey = document.getElementById('registerApiKey').value;
+
+            try {
+                const response = await fetch(getBaseUrl() + '/api/auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password, googleApiKey })
+                });
+
+                const result = await response.json();
+
+                if (result.success || result.Success) {
+                    userId = result.userId || result.UserId;
+                    userEmail = email;
+                    localStorage.setItem('userId', userId);
+                    localStorage.setItem('userEmail', email);
+                    showMainApp();
+                    initializeSignalR();
+                } else {
+                    showError(result.message || result.Message || 'Registration failed');
+                }
+            } catch (error) {
+                showError('Connection error. Please try again.');
+            } finally {
+                setAuthLoading('register', false);
+            }
+        }
+
+        // SignalR Functions
+        async function initializeSignalR() {
+            const baseUrl = getBaseUrl();
+            console.log('Connecting to:', baseUrl + '/workflowHub');
+
+            connection = new signalR.HubConnectionBuilder()
+                .withUrl(baseUrl + "/workflowHub", {
+                    skipNegotiation: false,
+                    transport: signalR.HttpTransportType.WebSockets | signalR.HttpTransportType.ServerSentEvents | signalR.HttpTransportType.LongPolling
+                })
+                .withAutomaticReconnect()
+                .build();
+
+            connection.on("ReceiveWorkflowUpdate", (progress) => {
+                console.log("Received update:", progress);
+                addWorkflowStep(progress);
+
+                if (progress.step === "COMPLETED" || progress.Step === "COMPLETED") {
+                    showFinalResult(progress);
+                    setProcessing(false);
+                } else if (progress.step === "ERROR" || progress.Step === "ERROR") {
+                    setProcessing(false);
+                }
+            });
+
+            try {
+                await connection.start();
+                updateConnectionStatus(true);
+            } catch (err) {
+                console.error("SignalR connection error:", err);
+                updateConnectionStatus(false);
+                setTimeout(initializeSignalR, 5000);
+            }
+        }
+
+       // function updateConnectionStatus(connected) {
+           // const statusDiv = document.getElementById('connectionStatus');
+            //if (connected) {
+            //     statusDiv.className = 'connection-status connected';
+            //     statusDiv.textContent = 'Connected';
+            //     document.getElementById('submitBtn').disabled = false;
+            // } else {
+            //     statusDiv.className = 'connection-status disconnected';
+            //     statusDiv.textContent = 'Reconnecting...';
+            //     document.getElementById('submitBtn').disabled = true;
+            // }
+       // }
+
+        function setProcessing(processing) {
+            isProcessing = processing;
+            document.getElementById('submitBtn').disabled = processing;
+            document.getElementById('btnText').style.display = processing ? 'none' : 'inline';
+            document.getElementById('btnSpinner').style.display = processing ? 'inline' : 'none';
+        }
+
+        function addWorkflowStep(progress) {
+            const workflowPath = document.getElementById('workflowPath');
+
+            if (workflowPath.querySelector('.empty-state') || workflowPath.querySelector('.no-results')) {
+                workflowPath.innerHTML = '';
+            }
+
+            const stepDiv = document.createElement('div');
+            const status = progress.status || progress.Status || 'processing';
+            stepDiv.className = `workflow-step ${status}`;
+
+            const timestamp = progress.timestamp || progress.Timestamp || new Date().toISOString();
+            const time = new Date(timestamp).toLocaleTimeString();
+
+            const step = progress.step || progress.Step || 'UNKNOWN';
+            const message = progress.message || progress.Message || 'Processing...';
+
+            stepDiv.innerHTML = `
+                <div class="step-header">
+                    <div class="step-title">${formatStepName(step)}</div>
+                    <div class="step-time">${time}</div>
+                </div>
+                <div class="step-message">${escapeHtml(message)}</div>
+            `;
+
+            workflowPath.appendChild(stepDiv);
+            stepDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function formatStepName(step) {
+            return step.replace(/_/g, ' ');
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function showFinalResult(progress) {
+            const data = progress.data || progress.Data;
+            if (!data) return;
+
+            const welcomeGift = data.welcomeGift || data.WelcomeGift;
+            const tierAnalysis = data.loyaltyTierAnalysis || data.LoyaltyTierAnalysis;
+            const workflowPath = data.workflowPath || data.WorkflowPath;
+            const bronzeTier = data.bronzeTier || data.BronzeTier;
+            const silverTier = data.silverTier || data.SilverTier;
+            const goldTier = data.goldTier || data.GoldTier;
+
+            const container = document.getElementById('resultsContainer');
+            let html = '<div class="results-container">';
+
+            // Welcome Gift
+            if (welcomeGift) {
+                html += '<div class="result-section">';
+                html += '<h3>Welcome Gift</h3>';
+                html += '<div class="result-body">';
+
+                const itemName = welcomeGift.itemName || welcomeGift.ItemName || 'Welcome Gift';
+                const description = welcomeGift.description || welcomeGift.Description || '';
+                const reasoning = welcomeGift.reasoning || welcomeGift.Reasoning || '';
+                const itemPrice = welcomeGift.itemPriceGBP || welcomeGift.ItemPriceGBP || 0;
+                const isFree = welcomeGift.isFree !== undefined ? welcomeGift.isFree : (welcomeGift.IsFree !== undefined ? welcomeGift.IsFree : true);
+                const dataSource = welcomeGift.dataSource || welcomeGift.DataSource || '';
+
+                html += `<div class="offer-highlight">${escapeHtml(itemName)}</div>`;
+
+                if (description) {
+                    html += `<div class="offer-item"><div class="offer-label">Description</div><div class="offer-value">${escapeHtml(description)}</div></div>`;
+                }
+
+                if (isFree) {
+                    html += `<div class="offer-item"><div class="offer-label">Type</div><div class="offer-value">FREE - No purchase required</div></div>`;
+                }
+
+                if (itemPrice > 0) {
+                    html += `<div class="offer-item"><div class="offer-label">Value</div><div class="offer-value">£${itemPrice.toFixed(2)}</div></div>`;
+                }
+
+                if (reasoning) {
+                    html += `<div class="offer-item"><div class="offer-label">Analysis</div><div class="offer-value">${escapeHtml(reasoning)}</div></div>`;
+                }
+
+                if (dataSource) {
+                    html += `<div class="offer-item"><div class="offer-label">Data Source</div><div class="offer-value">${escapeHtml(dataSource)}</div></div>`;
+                }
+
+                if (workflowPath) {
+                    html += `<div class="workflow-path-display">${escapeHtml(workflowPath)}</div>`;
+                }
+
+                html += '</div></div>';
+            }
+
+            // Loyalty Tiers - Use explicit tiers first, then fall back to tierAnalysis
+            const tiersToRender = [];
+            if (bronzeTier) tiersToRender.push({ tier: bronzeTier, name: 'Bronze' });
+            if (silverTier) tiersToRender.push({ tier: silverTier, name: 'Silver' });
+            if (goldTier) tiersToRender.push({ tier: goldTier, name: 'Gold' });
+
+            // If explicit tiers not available, use tierAnalysis
+            if (tiersToRender.length === 0 && tierAnalysis) {
+                const tierRewards = tierAnalysis.tierRewards || tierAnalysis.TierRewards || [];
+                tierRewards.forEach(tier => {
+                    const tierName = tier.tier !== undefined ? tier.tier : tier.Tier;
+                    const tierNames = ['Bronze', 'Silver', 'Gold'];
+                    const tierLabel = tierNames[tierName] || 'Tier';
+                    tiersToRender.push({ tier: tier, name: tierLabel });
+                });
+            }
+
+            if (tiersToRender.length > 0) {
+                html += '<div class="result-section">';
+                html += '<h3>Loyalty Tiers</h3>';
+                html += '<div class="result-body">';
+
+                // Get minimum spend from tierAnalysis if available
+                const minSpend = tierAnalysis ? (tierAnalysis.minimumSpendForToken || tierAnalysis.MinimumSpendForToken) : null;
+                if (minSpend) {
+                    html += `<div class="token-info">1 Token = £${minSpend.toFixed(2)} spent</div>`;
+                }
+
+                tiersToRender.forEach(({ tier, name }) => {
+                    const tokens = tier.requiredTokens || tier.RequiredTokens || 0;
+                    const options = tier.rewardOptions || tier.RewardOptions || [];
+                    const fallback = tier.fallbackDiscount || tier.FallbackDiscount;
+                    const reasoning = tier.reasoning || tier.Reasoning || '';
+
+                    html += `<div class="tier-card">`;
+                    html += `<div class="tier-header"><div class="tier-name">${name}</div><div class="tier-tokens">${tokens} Tokens</div></div>`;
+                    html += `<div class="tier-body">`;
+
+                    const freeItems = options.filter(o => o.canBeGivenFree || o.CanBeGivenFree);
+                    if (freeItems.length > 0) {
+                        html += '<div class="reward-section">';
+                        html += '<div class="reward-label">Free Rewards</div>';
+                        html += '<ul class="reward-list">';
+                        freeItems.forEach(item => {
+                            const itemName = item.itemName || item.ItemName;
+                            const itemValue = item.itemValueGBP || item.ItemValueGBP;
+                            html += `<li>${escapeHtml(itemName)} (£${itemValue?.toFixed(2) || '0.00'})</li>`;
+                        });
+                        html += '</ul></div>';
+                    }
+
+                    if (fallback) {
+                        const discount = fallback.discountPercentage || fallback.DiscountPercentage;
+                        const fallbackDesc = fallback.description || fallback.Description || '';
+                        html += '<div class="reward-section">';
+                        html += '<div class="reward-label">Alternative</div>';
+                        html += `<div class="reward-value">${discount}% off next purchase</div>`;
+                        if (fallbackDesc) {
+                            html += `<div class="reward-value" style="font-size: 0.85em; color: #666; margin-top: 4px;">${escapeHtml(fallbackDesc)}</div>`;
+                        }
+                        html += '</div>';
+                    }
+
+                    if (reasoning) {
+                        html += '<div class="reward-section">';
+                        html += '<div class="reward-label">Analysis</div>';
+                        html += `<div class="reward-value" style="font-size: 0.85em; color: #666;">${escapeHtml(reasoning)}</div>`;
+                        html += '</div>';
+                    }
+
+                    html += '</div></div>';
+                });
+
+                html += '</div></div>';
+            }
+
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        document.getElementById('businessForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            if (isProcessing) return;
+
+            document.getElementById('workflowPath').innerHTML = '';
+            document.getElementById('resultsContainer').innerHTML = '<div class="no-results">Processing...</div>';
+
+            setProcessing(true);
+
+            const formData = {
+                userId: parseInt(userId),
+                businessName: document.getElementById('businessName').value,
+                category: document.getElementById('category').value,
+                fullAddress: document.getElementById('fullAddress').value,
+                minimumSpent: parseFloat(document.getElementById('minimumSpent').value) || 25,
+                connectionId: connection.connectionId
+            };
+
+            try {
+                const baseUrl = getBaseUrl();
+                const response = await fetch(baseUrl + '/api/agent/loyalty', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(formData)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+
+                setTimeout(() => {
+                    if (document.getElementById('resultsContainer').innerHTML.includes('Processing...')) {
+                        showFinalResult({ data: result, Data: result });
+                    }
+                    setProcessing(false);
+                }, 2000);
+
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error processing request: ' + error.message);
+                setProcessing(false);
+            }
+        });
+
+        if (connection) {
+            connection.onclose(() => updateConnectionStatus(false));
+            connection.onreconnecting(() => updateConnectionStatus(false));
+            connection.onreconnected(() => updateConnectionStatus(true));
+        }
+
+        // Initialize app on load
+        initApp();
+    </script>
+</body>
+</html>

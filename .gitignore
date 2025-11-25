@@ -30,9 +30,6 @@ artifacts/
 *.pdb
 *.mdb
 
-# ASP.NET publish
-wwwroot/
-
 ##############################
 #          ANGULAR           #
 ##############################
