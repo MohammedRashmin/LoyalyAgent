@@ -141,4 +141,17 @@ namespace loyalityAgent2._0.Models
         public bool IsFree { get; set; } = true;
         public string DataSource { get; set; } = string.Empty;
     }
+
+    // Web Search Models
+    public class WebSearchResult
+    {
+        public bool Found { get; set; }
+        public string? Source { get; set; } // "Google", "Uber", "TripAdvisor", "Multiple"
+        public string? BusinessName { get; set; }
+        public string? Address { get; set; }
+        public string? Website { get; set; }
+        public string? PhoneNumber { get; set; }
+        public List<string> MenuItems { get; set; } = new();
+        public string? RawSearchData { get; set; } // Full search results for parsing
+    }
 }
