@@ -19,5 +19,11 @@ namespace loyalityAgent2._0.Services
         Task<ProductAnalysisResult> GenerateCategoryBasedProductsAsync(string businessName, string category, string address, decimal minimumSpent);
         Task<WelcomeGiftResponse> GenerateWelcomeGiftAsync(ProductAnalysisResult productAnalysis, ServiceAnalysisResult? serviceAnalysis, BusinessAttributes businessAttributes, decimal minimumSpent);
         Task<LoyaltyTierAnalysis> GenerateAllTiersCombinedAsync(BusinessAttributes businessAttributes, ProductAnalysisResult? productAnalysis, ServiceAnalysisResult? serviceAnalysis, decimal minimumSpendForToken);
+        
+        // Web search methods
+        Task<WebSearchResult> SearchBusinessOnWebPlatformsAsync(string businessName, string location);
+        Task<BusinessAttributes> ExtractBusinessAttributesFromWebSearchAsync(WebSearchResult webSearchResult, string businessName, string category, string fullAddress);
+        Task<ProductAnalysisResult> ExtractProductsFromWebSearchAsync(WebSearchResult webSearchResult, string businessName, string category, string fullAddress);
+        Task<LoyaltyTierAnalysis> GenerateDiscountOnlyTiersAsync(BusinessAttributes businessAttributes, ProductAnalysisResult? productAnalysis, ServiceAnalysisResult? serviceAnalysis, decimal minimumSpendForToken);
     }
 }

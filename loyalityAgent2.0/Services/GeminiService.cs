@@ -958,12 +958,13 @@ FALLBACK: If items cannot be given free, suggest {tier.FallbackDiscount}% discou
             {
                 _logger.LogInformation("Extracting menu with Geoapify data for: {BusinessName}", businessName);
 
+                // STEP 1: Fast Path - Google Search (5-8s)
                 var prompt = $@"Business: {businessName}
 Category: {category}
 Address: {address}
 {(placeDetails != null ? $"Website: {placeDetails.Website ?? "Not available"}\nPhone: {placeDetails.PhoneNumber ?? "Not available"}" : "")}
 
-TASK: Extract menu items and prices for this business.
+TASK: Search Google for menu items and prices for this business.
 - Search web for actual menu items
 - Get real prices in GBP (£)
 - List ALL products with prices
@@ -974,7 +975,48 @@ PRODUCTS: Product1 - £X.XX, Product2 - £Y.YY
 RECOMMENDED FREE: ProductName - £Z.ZZ";
 
                 var response = await PerformGoogleSearchWithPromptAsync(prompt);
-                return ParseProductAnalysisWithPricesFromText(response, 0);
+                var productAnalysis = ParseProductAnalysisWithPricesFromText(response, 0);
+
+                // Check if we got sufficient menu items (at least 3 items)
+                if (productAnalysis.AllProducts.Count >= 3)
+                {
+                    _logger.LogInformation("Sufficient menu items found via Google Search: {Count}", 
+                        productAnalysis.AllProducts.Count);
+                    return productAnalysis; // Fast path success ✅
+                }
+
+                // STEP 2: Enhanced Path - Multi-platform search (only if needed)
+                _logger.LogInformation("Insufficient menu items ({Count}), searching Uber/TripAdvisor/Google...", 
+                    productAnalysis.AllProducts.Count);
+
+                var enhancedPrompt = $@"Business: {businessName}
+Website: {placeDetails?.Website ?? "Not available"}
+Address: {address}
+Category: {category}
+
+TASK: Search Google, Uber Eats, and TripAdvisor for menu items.
+- Search Google Business/Google Maps
+- Search Uber Eats (if food business)
+- Search TripAdvisor restaurant page
+- Extract ALL products with prices in GBP (£)
+- Get comprehensive menu from multiple sources
+
+Format:
+PRODUCTS: Product1 - £X.XX, Product2 - £Y.YY
+RECOMMENDED FREE: ProductName - £Z.ZZ";
+
+                var enhancedResponse = await PerformGoogleSearchWithPromptAsync(enhancedPrompt);
+                var enhancedAnalysis = ParseProductAnalysisWithPricesFromText(enhancedResponse, 0);
+
+                // Use enhanced if better, otherwise use original
+                if (enhancedAnalysis.AllProducts.Count > productAnalysis.AllProducts.Count)
+                {
+                    _logger.LogInformation("Enhanced search found more items: {Count} vs {OriginalCount}", 
+                        enhancedAnalysis.AllProducts.Count, productAnalysis.AllProducts.Count);
+                    return enhancedAnalysis;
+                }
+
+                return productAnalysis;
             }
             catch (Exception ex)
             {
@@ -1320,6 +1362,252 @@ REASONING: [explanation]";
                 return $"{tierReward.FallbackDiscountPercentage}% discount";
             }
             return "None";
+        }
+
+        // Web Search Methods
+        public async Task<WebSearchResult> SearchBusinessOnWebPlatformsAsync(string businessName, string location)
+        {
+            try
+            {
+                _logger.LogInformation("Searching web platforms for business: {BusinessName} in {Location}", businessName, location);
+
+                var prompt = $@"Search Google, Uber Eats, and TripAdvisor for: ""{businessName}"" in ""{location}""
+
+Find information about this business:
+- Business name, address, website, phone number
+- Menu items and prices (if restaurant/food business)
+- Services offered (if service business)
+- Reviews/ratings if available
+
+Sources to check:
+1. Google Business/Google Maps
+2. Uber Eats (if food business)
+3. TripAdvisor
+
+Respond with:
+FOUND: YES or NO
+SOURCE: Google/Uber/TripAdvisor/Multiple
+BUSINESS_NAME: [name if found]
+ADDRESS: [address if found]
+WEBSITE: [website if found]
+PHONE: [phone if found]
+MENU_ITEMS: [list of menu items if found]
+RAW_DATA: [full search results]";
+
+                var response = await PerformGoogleSearchWithPromptAsync(prompt);
+                return ParseWebSearchResult(response, businessName, location);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error searching web platforms");
+                return new WebSearchResult { Found = false };
+            }
+        }
+
+        private WebSearchResult ParseWebSearchResult(string text, string businessName, string location)
+        {
+            var result = new WebSearchResult { Found = false };
+
+            try
+            {
+                // Check if found
+                var foundMatch = Regex.Match(text, @"FOUND:\s*(YES|NO)", RegexOptions.IgnoreCase);
+                if (foundMatch.Success && foundMatch.Groups[1].Value.Equals("YES", StringComparison.OrdinalIgnoreCase))
+                {
+                    result.Found = true;
+
+                    // Extract source
+                    var sourceMatch = Regex.Match(text, @"SOURCE:\s*([^\n]+)", RegexOptions.IgnoreCase);
+                    if (sourceMatch.Success)
+                    {
+                        result.Source = sourceMatch.Groups[1].Value.Trim();
+                    }
+
+                    // Extract business name
+                    var nameMatch = Regex.Match(text, @"BUSINESS_NAME:\s*([^\n]+)", RegexOptions.IgnoreCase);
+                    if (nameMatch.Success)
+                    {
+                        result.BusinessName = nameMatch.Groups[1].Value.Trim();
+                    }
+
+                    // Extract address
+                    var addressMatch = Regex.Match(text, @"ADDRESS:\s*([^\n]+)", RegexOptions.IgnoreCase);
+                    if (addressMatch.Success)
+                    {
+                        result.Address = addressMatch.Groups[1].Value.Trim();
+                    }
+
+                    // Extract website
+                    var websiteMatch = Regex.Match(text, @"WEBSITE:\s*([^\n]+)", RegexOptions.IgnoreCase);
+                    if (websiteMatch.Success)
+                    {
+                        result.Website = websiteMatch.Groups[1].Value.Trim();
+                    }
+
+                    // Extract phone
+                    var phoneMatch = Regex.Match(text, @"PHONE:\s*([^\n]+)", RegexOptions.IgnoreCase);
+                    if (phoneMatch.Success)
+                    {
+                        result.PhoneNumber = phoneMatch.Groups[1].Value.Trim();
+                    }
+
+                    // Extract menu items
+                    var menuMatch = Regex.Match(text, @"MENU_ITEMS:\s*(.+?)(?=RAW_DATA:|$)", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+                    if (menuMatch.Success)
+                    {
+                        var menuText = menuMatch.Groups[1].Value.Trim();
+                        result.MenuItems = menuText.Split(new[] { ',', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                            .Select(item => item.Trim())
+                            .Where(item => !string.IsNullOrEmpty(item))
+                            .ToList();
+                    }
+
+                    // Extract raw data
+                    var rawDataMatch = Regex.Match(text, @"RAW_DATA:\s*(.+?)$", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+                    if (rawDataMatch.Success)
+                    {
+                        result.RawSearchData = rawDataMatch.Groups[1].Value.Trim();
+                    }
+                    else
+                    {
+                        result.RawSearchData = text; // Use full response if no RAW_DATA section
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error parsing web search result");
+            }
+
+            return result;
+        }
+
+        public async Task<BusinessAttributes> ExtractBusinessAttributesFromWebSearchAsync(WebSearchResult webSearchResult, string businessName, string category, string fullAddress)
+        {
+            try
+            {
+                _logger.LogInformation("Extracting business attributes from web search for: {BusinessName}", businessName);
+
+                var prompt = $@"Business found via web search:
+Name: {webSearchResult.BusinessName ?? businessName}
+Address: {webSearchResult.Address ?? fullAddress}
+Website: {webSearchResult.Website ?? "Not available"}
+Phone: {webSearchResult.PhoneNumber ?? "Not available"}
+Category: {category}
+
+Web Search Data:
+{webSearchResult.RawSearchData ?? "No additional data"}
+
+TASK: Extract business attributes from the web search information.
+Determine:
+- Business model (B2B, B2C, etc.)
+- Core products or services
+- Target audience
+- Business tone/style
+- Popularity/size
+- Specialization keywords
+- Business type (Product, Service, or Hybrid)
+
+Give me real, specific information based on the web search data.";
+
+                var response = await PerformGoogleSearchWithPromptAsync(prompt);
+                return ParseBusinessAttributesFromText(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error extracting business attributes from web search");
+                return await ExtractBusinessAttributesAsync(businessName, category, fullAddress); // Fallback
+            }
+        }
+
+        public async Task<ProductAnalysisResult> ExtractProductsFromWebSearchAsync(WebSearchResult webSearchResult, string businessName, string category, string fullAddress)
+        {
+            try
+            {
+                _logger.LogInformation("Extracting products from web search for: {BusinessName}", businessName);
+
+                var prompt = $@"Business found via web search:
+Name: {webSearchResult.BusinessName ?? businessName}
+Address: {webSearchResult.Address ?? fullAddress}
+Website: {webSearchResult.Website ?? "Not available"}
+Category: {category}
+
+Web Search Data:
+{webSearchResult.RawSearchData ?? "No additional data"}
+
+Menu Items Found: {string.Join(", ", webSearchResult.MenuItems)}
+
+TASK: Extract menu items and prices from the web search data.
+- Extract ALL products with prices in GBP (£)
+- Use the menu items found in web search
+- Get real prices from the search results
+- List ALL products with prices
+
+Format:
+PRODUCTS: Product1 - £X.XX, Product2 - £Y.YY
+RECOMMENDED FREE: ProductName - £Z.ZZ";
+
+                var response = await PerformGoogleSearchWithPromptAsync(prompt);
+                return ParseProductAnalysisWithPricesFromText(response, 0);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error extracting products from web search");
+                return new ProductAnalysisResult();
+            }
+        }
+
+        public async Task<LoyaltyTierAnalysis> GenerateDiscountOnlyTiersAsync(BusinessAttributes businessAttributes, ProductAnalysisResult? productAnalysis, ServiceAnalysisResult? serviceAnalysis, decimal minimumSpendForToken)
+        {
+            try
+            {
+                _logger.LogInformation("Generating discount-only tiers. Min spend for 1 token: £{MinSpend}", minimumSpendForToken);
+
+                var analysis = new LoyaltyTierAnalysis
+                {
+                    MinimumSpendForToken = minimumSpendForToken,
+                    TierRewards = new List<LoyaltyTierReward>(),
+                    HasFreeItemOptions = false,
+                    OverallStrategy = "Token-based loyalty program with tier-based discount rewards (real business found but insufficient data for free items)"
+                };
+
+                // Define tier requirements with discount only
+                var tiers = new[]
+                {
+                    new { Tier = LoyaltyTier.Bronze, Tokens = 3, Discount = 10m },
+                    new { Tier = LoyaltyTier.Silver, Tokens = 5, Discount = 20m },
+                    new { Tier = LoyaltyTier.Gold, Tokens = 7, Discount = 40m }
+                };
+
+                foreach (var tier in tiers)
+                {
+                    var totalSpendForTier = minimumSpendForToken * tier.Tokens;
+
+                    var tierReward = new LoyaltyTierReward
+                    {
+                        Tier = tier.Tier,
+                        RequiredTokens = tier.Tokens,
+                        RewardOptions = new List<TierRewardOption>(), // No free items
+                        FallbackDiscount = new TierFallbackDiscount
+                        {
+                            DiscountPercentage = tier.Discount,
+                            Description = $"Get {tier.Discount}% off your next purchase",
+                            Reasoning = $"Real business found but using discount-only rewards. Customer has spent £{totalSpendForTier} total."
+                        },
+                        Reasoning = $"{tier.Tier} tier: {tier.Tokens} tokens for {tier.Discount}% discount (discount-only due to limited business data)"
+                    };
+
+                    analysis.TierRewards.Add(tierReward);
+                }
+
+                _logger.LogInformation("Discount-only tier analysis complete");
+                return analysis;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error generating discount-only tiers");
+                return CreateFallbackTierAnalysis(minimumSpendForToken);
+            }
         }
     }
 }

@@ -71,52 +71,83 @@ namespace loyalityAgent2._0.Services
                 else
                 {
                     // Business NOT found in Geoapify
-                    _logger.LogInformation("Business not found in Geoapify, searching database for similar businesses");
-                    await BroadcastProgressAsync(connectionId, "GEOAPIFY_NOT_FOUND", "Business not found, searching database for similar businesses...");
+                    _logger.LogInformation("Business not found in Geoapify, searching web platforms...");
+                    await BroadcastProgressAsync(connectionId, "GEOAPIFY_NOT_FOUND", "Business not found in Geoapify, searching web platforms...");
 
-                    // STEP 2: Search Database for Similar Business (0.5s)
-                    similarBusiness = await _similarBusinessService.FindSimilarBusinessAsync(category, fullAddress);
+                    // STEP 2: Web Search (Uber/TripAdvisor/Google)
+                    await BroadcastProgressAsync(connectionId, "WEB_SEARCH", "Searching web platforms (Google, Uber, TripAdvisor)...");
+                    var webSearchResult = await _geminiService.SearchBusinessOnWebPlatformsAsync(businessName, fullAddress);
 
-                    if (similarBusiness != null)
+                    if (webSearchResult.Found)
                     {
-                        // Similar business found in database
-                        _logger.LogInformation("Found similar business in database: {Name}", similarBusiness.BusinessName);
-                        dataSource = $"Similar Business: {similarBusiness.BusinessName}";
-                        isRealData = true;
-                        similarBusinessName = similarBusiness.BusinessName;
-                        workflowPath = "Geoapify → Database Similar";
+                        // Business found via web search
+                        _logger.LogInformation("Business found via web search on: {Source}", webSearchResult.Source);
+                        await BroadcastProgressAsync(connectionId, "WEB_SEARCH_FOUND", $"Found business on {webSearchResult.Source}");
 
-                        await BroadcastProgressAsync(connectionId, "SIMILAR_FOUND", $"Found similar business: {similarBusiness.BusinessName}");
+                        // STEP 3: Check Database for Similar Business
+                        await BroadcastProgressAsync(connectionId, "CHECK_DATABASE_SIMILAR", "Checking database for similar businesses...");
+                        similarBusiness = await _similarBusinessService.FindSimilarBusinessAsync(category, fullAddress);
 
-                        // Get complete similar business data
-                        var similarBusinessData = await _similarBusinessService.GetCompleteBusinessDataAsync(similarBusiness.BusinessId);
-
-                        // Extract basic attributes
-                        businessAttributes = new BusinessAttributes
+                        if (similarBusiness != null)
                         {
-                            BusinessModel = similarBusiness.BusinessModel,
-                            CoreProductsOrServices = similarBusiness.CoreProductsOrServices,
-                            TargetAudience = similarBusiness.TargetAudience,
-                            BusinessToneOrStyle = similarBusiness.BusinessToneOrStyle,
-                            PopularityOrSize = similarBusiness.PopularityOrSize,
-                            SpecializationKeywords = similarBusiness.SpecializationKeywords,
-                            BusinessType = similarBusiness.BusinessType
-                        };
+                            // Similar business found in database
+                            _logger.LogInformation("Found similar business in database: {Name}", similarBusiness.BusinessName);
+                            dataSource = $"Web Search ({webSearchResult.Source}) → Similar Business: {similarBusiness.BusinessName}";
+                            isRealData = true;
+                            similarBusinessName = similarBusiness.BusinessName;
+                            workflowPath = "Geoapify → Web Search → Database Similar";
 
-                        // Generate unique products based on similar business
-                        await BroadcastProgressAsync(connectionId, "GENERATE_UNIQUE", "Generating unique suggestions based on similar business...");
-                        productAnalysis = await _geminiService.GenerateUniqueFromSimilarBusinessAsync(
-                            businessName, category, fullAddress, similarBusinessData, minimumSpent);
+                            await BroadcastProgressAsync(connectionId, "SIMILAR_FOUND", $"Found similar business: {similarBusiness.BusinessName}");
+
+                            // Get complete similar business data
+                            var similarBusinessData = await _similarBusinessService.GetCompleteBusinessDataAsync(similarBusiness.BusinessId);
+
+                            // Extract basic attributes
+                            businessAttributes = new BusinessAttributes
+                            {
+                                BusinessModel = similarBusiness.BusinessModel,
+                                CoreProductsOrServices = similarBusiness.CoreProductsOrServices,
+                                TargetAudience = similarBusiness.TargetAudience,
+                                BusinessToneOrStyle = similarBusiness.BusinessToneOrStyle,
+                                PopularityOrSize = similarBusiness.PopularityOrSize,
+                                SpecializationKeywords = similarBusiness.SpecializationKeywords,
+                                BusinessType = similarBusiness.BusinessType
+                            };
+
+                            // Generate unique products based on similar business
+                            await BroadcastProgressAsync(connectionId, "GENERATE_UNIQUE", "Generating unique suggestions based on similar business...");
+                            productAnalysis = await _geminiService.GenerateUniqueFromSimilarBusinessAsync(
+                                businessName, category, fullAddress, similarBusinessData, minimumSpent);
+                        }
+                        else
+                        {
+                            // No similar business in database - use Fallback Discount
+                            _logger.LogInformation("No similar business found, using fallback discount (real business found)");
+                            dataSource = "Web Search → Fallback Discount";
+                            isRealData = true;
+                            workflowPath = "Geoapify → Web Search → Fallback Discount";
+
+                            await BroadcastProgressAsync(connectionId, "FALLBACK_DISCOUNT", "Using discount-only rewards (real business found but no similar in database)...");
+
+                            // Extract business attributes from web search
+                            businessAttributes = await _geminiService.ExtractBusinessAttributesFromWebSearchAsync(
+                                webSearchResult, businessName, category, fullAddress);
+
+                            // Extract products from web search (real menu items)
+                            await BroadcastProgressAsync(connectionId, "EXTRACT_PRODUCTS_WEB", "Extracting products from web search data...");
+                            productAnalysis = await _geminiService.ExtractProductsFromWebSearchAsync(
+                                webSearchResult, businessName, category, fullAddress);
+                        }
                     }
                     else
                     {
-                        // No similar business in database - use category-based
-                        _logger.LogInformation("No similar business found, using category-based analysis");
+                        // Web search also failed - use category-based
+                        _logger.LogInformation("Business not found on web platforms, using category-based analysis");
                         dataSource = "Category-Based AI";
                         isRealData = false;
-                        workflowPath = "Geoapify → Database → Category-Based";
+                        workflowPath = "Geoapify → Web Search → Category-Based";
 
-                        await BroadcastProgressAsync(connectionId, "CATEGORY_BASED", "Using category-based analysis...");
+                        await BroadcastProgressAsync(connectionId, "WEB_SEARCH_NOT_FOUND", "Business not found on web platforms, using category-based analysis...");
 
                         // Extract basic attributes
                         businessAttributes = await _geminiService.ExtractBusinessAttributesAsync(businessName, category, fullAddress);
@@ -140,8 +171,19 @@ namespace loyalityAgent2._0.Services
 
                 // STEP 5: Generate All 3 Tiers Combined (10s)
                 await BroadcastProgressAsync(connectionId, "GENERATE_TIERS", "Generating loyalty tiers (Bronze, Silver, Gold)...");
-                var tierAnalysis = await _geminiService.GenerateAllTiersCombinedAsync(
-                    businessAttributes, productAnalysis, serviceAnalysis, minimumSpent);
+                
+                LoyaltyTierAnalysis tierAnalysis;
+                // Use discount-only tiers if we're in fallback discount mode
+                if (dataSource == "Web Search → Fallback Discount")
+                {
+                    tierAnalysis = await _geminiService.GenerateDiscountOnlyTiersAsync(
+                        businessAttributes, productAnalysis, serviceAnalysis, minimumSpent);
+                }
+                else
+                {
+                    tierAnalysis = await _geminiService.GenerateAllTiersCombinedAsync(
+                        businessAttributes, productAnalysis, serviceAnalysis, minimumSpent);
+                }
 
                 // Ensure all tiers are filled
                 EnsureAllTiersFilled(tierAnalysis, minimumSpent);
