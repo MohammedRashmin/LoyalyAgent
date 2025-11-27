@@ -21,11 +21,14 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 // Register HttpClient for API services
 builder.Services.AddHttpClient<IGeminiService, GeminiService>();
 builder.Services.AddHttpClient<IGeoapifyService, GeoapifyService>();
+builder.Services.AddHttpClient<IMenuScraperService, MenuScraperService>();
 
 // Register application services
 builder.Services.AddScoped<IAgentOrchestratorService, AgentOrchestratorService>();
+builder.Services.AddScoped<IGeminiService, GeminiService>();
 builder.Services.AddScoped<IGeoapifyService, GeoapifyService>();
 builder.Services.AddScoped<ISimilarBusinessService, SimilarBusinessService>();
+builder.Services.AddScoped<IMenuScraperService, MenuScraperService>();
 
 // Enable CORS for development (SignalR compatible)
 builder.Services.AddCors(options =>

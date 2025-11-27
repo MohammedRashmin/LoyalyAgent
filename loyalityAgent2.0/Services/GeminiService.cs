@@ -1334,6 +1334,112 @@ REASONING: [explanation]";
             return reward;
         }
 
+        public async Task<string> SearchWebsiteUrlAsync(string businessName, string address)
+        {
+            try
+            {
+                _logger.LogInformation("Searching for website URL using Google Search: {BusinessName}", businessName);
+
+                var prompt = $@"Search Google for the official website of this business:
+
+Business Name: {businessName}
+Address: {address}
+
+Find the official website URL. Look for the business's own website (not Yelp, TripAdvisor, Facebook, or other third-party sites).
+
+Respond with ONLY the website URL in this exact format:
+WEBSITE: https://www.example.com
+
+If you cannot find the website, respond with:
+WEBSITE: NOT_FOUND";
+
+                // Use Google Search grounding for better results
+                var response = await PerformGoogleSearchWithPromptAsync(prompt);
+                
+                _logger.LogInformation("Website search response: {Response}", response);
+
+                // Extract website URL - try multiple patterns
+                string? website = null;
+
+                // Pattern 1: WEBSITE: https://...
+                var websiteMatch1 = Regex.Match(
+                    response, 
+                    @"WEBSITE:\s*(https?://[^\s\n\)]+)", 
+                    RegexOptions.IgnoreCase);
+                
+                if (websiteMatch1.Success)
+                {
+                    website = websiteMatch1.Groups[1].Value.Trim();
+                }
+                else
+                {
+                    // Pattern 2: Direct URL in response (https://www...)
+                    var urlMatch = Regex.Match(
+                        response,
+                        @"(https?://(?:www\.)?[a-zA-Z0-9-]+\.[a-zA-Z]{2,}(?:/[^\s\n\)]*)?)",
+                        RegexOptions.IgnoreCase);
+                    
+                    if (urlMatch.Success)
+                    {
+                        var foundUrl = urlMatch.Groups[1].Value.Trim();
+                        // Filter out common third-party sites
+                        if (!foundUrl.Contains("yelp.com") && 
+                            !foundUrl.Contains("tripadvisor.com") && 
+                            !foundUrl.Contains("facebook.com") &&
+                            !foundUrl.Contains("google.com") &&
+                            !foundUrl.Contains("zomato.com") &&
+                            !foundUrl.Contains("uber.com"))
+                        {
+                            website = foundUrl;
+                        }
+                    }
+                    
+                    if (string.IsNullOrEmpty(website))
+                    {
+                        // Pattern 3: www.businessname.com format
+                        var businessNameLower = businessName.ToLower().Replace(" ", "").Replace("'", "");
+                        var wwwMatch = Regex.Match(
+                            response,
+                            $@"(www\.{Regex.Escape(businessNameLower)}\.[a-zA-Z]{{2,}})",
+                            RegexOptions.IgnoreCase);
+                        
+                        if (wwwMatch.Success)
+                        {
+                            website = "https://" + wwwMatch.Groups[1].Value.Trim();
+                        }
+                    }
+                }
+
+                // Normalize URL
+                if (!string.IsNullOrEmpty(website))
+                {
+                    website = website.TrimEnd('.', ',', ';', '!', '?', ')', ']');
+                    
+                    // Add protocol if missing
+                    if (!website.StartsWith("http://") && !website.StartsWith("https://"))
+                    {
+                        website = "https://" + website;
+                    }
+
+                    // Validate URL format
+                    if (Uri.TryCreate(website, UriKind.Absolute, out var uri) && 
+                        (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+                    {
+                        _logger.LogInformation("Found website URL: {Website}", website);
+                        return website;
+                    }
+                }
+
+                _logger.LogWarning("Website URL not found for business: {BusinessName}", businessName);
+                return string.Empty;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error searching for website URL");
+                return string.Empty;
+            }
+        }
+
         private LoyaltyTierAnalysis CreateFallbackTierAnalysis(decimal minimumSpendForToken)
         {
             return new LoyaltyTierAnalysis

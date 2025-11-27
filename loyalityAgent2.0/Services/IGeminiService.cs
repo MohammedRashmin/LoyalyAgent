@@ -12,6 +12,7 @@ namespace loyalityAgent2._0.Services
         Task<ReasoningResult> ReasonServiceDiscountAsync(BusinessAttributes businessAttributes, string service, decimal servicePrice, decimal minimumSpent);
         Task<LoyaltyTierAnalysis> AnalyzeLoyaltyTiersAsync(BusinessAttributes businessAttributes, ProductAnalysisResult? productAnalysis, ServiceAnalysisResult? serviceAnalysis, decimal minimumSpendForToken);
         Task<string> GeneratePromptAsync(string prompt);
+        Task<string> SearchWebsiteUrlAsync(string businessName, string address);
         
         // New methods for optimized workflow
         Task<ProductAnalysisResult> ExtractMenuWithGeoapifyDataAsync(PlaceDetails? placeDetails, string businessName, string category, string address);

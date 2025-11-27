@@ -58,15 +58,77 @@ namespace loyalityAgent2._0.Services
                 var geometry = feature.GetProperty("geometry");
                 var coordinates = geometry.GetProperty("coordinates");
 
+                // Debug: Log available properties to diagnose website extraction
+                var propertyNames = properties.EnumerateObject().Select(p => p.Name).ToList();
+                _logger.LogInformation("Geoapify properties available: {Properties}", string.Join(", ", propertyNames));
+
+                // Extract website - try multiple property names
+                string? website = null;
+                if (properties.TryGetProperty("website", out var websiteProp))
+                {
+                    website = websiteProp.GetString();
+                }
+                else if (properties.TryGetProperty("url", out var urlProp))
+                {
+                    website = urlProp.GetString();
+                }
+                else if (properties.TryGetProperty("contact", out var contactProp))
+                {
+                    if (contactProp.TryGetProperty("website", out var contactWebsite))
+                    {
+                        website = contactWebsite.GetString();
+                    }
+                }
+                else if (properties.TryGetProperty("datasource", out var datasourceProp))
+                {
+                    if (datasourceProp.TryGetProperty("raw", out var rawProp))
+                    {
+                        if (rawProp.TryGetProperty("website", out var rawWebsite))
+                        {
+                            website = rawWebsite.GetString();
+                        }
+                        else if (rawProp.TryGetProperty("url", out var rawUrl))
+                        {
+                            website = rawUrl.GetString();
+                        }
+                    }
+                }
+
+                // Extract phone - try multiple property names
+                string? phone = null;
+                if (properties.TryGetProperty("phone", out var phoneProp))
+                {
+                    phone = phoneProp.GetString();
+                }
+                else if (properties.TryGetProperty("contact", out var contactPhoneProp))
+                {
+                    if (contactPhoneProp.TryGetProperty("phone", out var contactPhone))
+                    {
+                        phone = contactPhone.GetString();
+                    }
+                }
+                else if (properties.TryGetProperty("datasource", out var datasourcePhoneProp))
+                {
+                    if (datasourcePhoneProp.TryGetProperty("raw", out var rawPhoneProp))
+                    {
+                        if (rawPhoneProp.TryGetProperty("phone", out var rawPhone))
+                        {
+                            phone = rawPhone.GetString();
+                        }
+                    }
+                }
+
                 var placeDetails = new PlaceDetails
                 {
                     Name = properties.TryGetProperty("name", out var name) ? name.GetString() ?? "" : "",
                     FormattedAddress = properties.TryGetProperty("formatted", out var formatted) ? formatted.GetString() ?? "" : "",
                     Latitude = coordinates[1].GetDouble(),
                     Longitude = coordinates[0].GetDouble(),
-                    Website = properties.TryGetProperty("website", out var website) ? website.GetString() : null,
-                    PhoneNumber = properties.TryGetProperty("phone", out var phone) ? phone.GetString() : null
+                    Website = website,
+                    PhoneNumber = phone
                 };
+
+                _logger.LogInformation("Extracted website: {Website}, phone: {Phone}", website ?? "Not found", phone ?? "Not found");
 
                 // Extract categories
                 if (properties.TryGetProperty("categories", out var categories))

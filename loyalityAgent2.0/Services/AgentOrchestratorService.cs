@@ -9,6 +9,7 @@ namespace loyalityAgent2._0.Services
         private readonly IGeminiService _geminiService;
         private readonly IGeoapifyService _geoapifyService;
         private readonly ISimilarBusinessService _similarBusinessService;
+        private readonly IMenuScraperService _menuScraperService;
         private readonly ILogger<AgentOrchestratorService> _logger;
         private readonly IHubContext<WorkflowHub> _hubContext;
 
@@ -16,12 +17,14 @@ namespace loyalityAgent2._0.Services
             IGeminiService geminiService,
             IGeoapifyService geoapifyService,
             ISimilarBusinessService similarBusinessService,
+            IMenuScraperService menuScraperService,
             ILogger<AgentOrchestratorService> logger,
             IHubContext<WorkflowHub> hubContext)
         {
             _geminiService = geminiService;
             _geoapifyService = geoapifyService;
             _similarBusinessService = similarBusinessService;
+            _menuScraperService = menuScraperService;
             _logger = logger;
             _hubContext = hubContext;
         }
@@ -57,16 +60,78 @@ namespace loyalityAgent2._0.Services
                     _logger.LogInformation("Business found in Geoapify: {Name}", placeDetails.Name);
                     dataSource = "Geoapify";
                     isRealData = true;
-                    workflowPath = "Geoapify → Real Data";
 
                     await BroadcastProgressAsync(connectionId, "GEOAPIFY_FOUND", $"Found business: {placeDetails.Name}");
 
                     // Extract business attributes
                     businessAttributes = await _geminiService.ExtractBusinessAttributesAsync(businessName, category, fullAddress);
 
-                    // Extract menu with Geoapify data
-                    await BroadcastProgressAsync(connectionId, "EXTRACT_MENU", "Extracting menu items and prices...");
-                    productAnalysis = await _geminiService.ExtractMenuWithGeoapifyDataAsync(placeDetails, businessName, category, fullAddress);
+                    // STEP 2: Try to find website if not provided by Geoapify
+                    string? websiteUrl = placeDetails.Website;
+                    
+                    if (string.IsNullOrEmpty(websiteUrl))
+                    {
+                        _logger.LogInformation("Website not found in Geoapify, searching for website URL...");
+                        await BroadcastProgressAsync(connectionId, "SEARCH_WEBSITE", 
+                            "Searching for business website...");
+                        
+                        // Try to find website using business name
+                        websiteUrl = await FindWebsiteUrlAsync(businessName, fullAddress);
+                        
+                        if (!string.IsNullOrEmpty(websiteUrl))
+                        {
+                            _logger.LogInformation("Found website via search: {Website}", websiteUrl);
+                            placeDetails.Website = websiteUrl; // Update placeDetails for future use
+                        }
+                    }
+
+                    // STEP 3: Try website scraping first (if website available)
+                    if (!string.IsNullOrEmpty(websiteUrl))
+                    {
+                        await BroadcastProgressAsync(connectionId, "SCRAPE_WEBSITE", 
+                            $"Scraping menu from website: {websiteUrl}");
+
+                        productAnalysis = await _menuScraperService.ScrapeMenuFromWebsiteAsync(
+                            websiteUrl, businessName, category);
+
+                        if (productAnalysis.AllProducts.Count >= 3)
+                        {
+                            // ✅ Success: Real menu from website
+                            _logger.LogInformation("Successfully scraped {Count} menu items from website", 
+                                productAnalysis.AllProducts.Count);
+                            workflowPath = "Geoapify → Website Scraping → Real Menu";
+                            dataSource = "Geoapify + Website Scraping";
+                            await BroadcastProgressAsync(connectionId, "SCRAPE_SUCCESS", 
+                                $"Successfully extracted {productAnalysis.AllProducts.Count} menu items from website");
+                        }
+                        else
+                        {
+                            // ❌ Scraping failed or insufficient items - fallback to AI
+                            _logger.LogInformation("Website scraping found {Count} items, falling back to AI extraction", 
+                                productAnalysis.AllProducts.Count);
+                            await BroadcastProgressAsync(connectionId, "SCRAPE_FAILED", 
+                                "Website scraping found insufficient items, using AI extraction...");
+
+                            productAnalysis = await _geminiService.ExtractMenuWithGeoapifyDataAsync(
+                                placeDetails, businessName, category, fullAddress);
+
+                            workflowPath = "Geoapify → Website Scraping Failed → AI Extraction";
+                            dataSource = "Geoapify + AI Extraction";
+                        }
+                    }
+                    else
+                    {
+                        // ❌ No website available - use AI extraction
+                        _logger.LogInformation("No website available, using AI extraction");
+                        await BroadcastProgressAsync(connectionId, "NO_WEBSITE", 
+                            "No website available, using AI extraction...");
+
+                        productAnalysis = await _geminiService.ExtractMenuWithGeoapifyDataAsync(
+                            placeDetails, businessName, category, fullAddress);
+
+                        workflowPath = "Geoapify → No Website → AI Extraction";
+                        dataSource = "Geoapify + AI Extraction";
+                    }
                 }
                 else
                 {
@@ -282,6 +347,29 @@ namespace loyalityAgent2._0.Services
                 },
                 Reasoning = $"{tier} tier: {tokens} tokens for {discount}% discount"
             };
+        }
+
+        private async Task<string?> FindWebsiteUrlAsync(string businessName, string address)
+        {
+            try
+            {
+                _logger.LogInformation("Searching for website URL for business: {BusinessName}", businessName);
+
+                // Use Gemini with Google Search grounding for better results
+                var website = await _geminiService.SearchWebsiteUrlAsync(businessName, address);
+                
+                if (!string.IsNullOrEmpty(website))
+                {
+                    return website;
+                }
+
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error searching for website URL");
+                return null;
+            }
         }
 
         private async Task BroadcastProgressAsync(string? connectionId, string step, string message, object? data = null)
