@@ -18,17 +18,28 @@ builder.Services.AddSignalR();
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-// Register HttpClient for API services
-builder.Services.AddHttpClient<IGeminiService, GeminiService>();
-builder.Services.AddHttpClient<IGeoapifyService, GeoapifyService>();
-builder.Services.AddHttpClient<IMenuScraperService, MenuScraperService>();
+// Register HttpContextAccessor for accessing HttpContext
+builder.Services.AddHttpContextAccessor();
 
-// Register application services
+// Register connection context and API call logging services
+builder.Services.AddScoped<IConnectionContextService, ConnectionContextService>();
+builder.Services.AddScoped<IApiCallLoggerService, ApiCallLoggerService>();
+
+// Register the logging handler - must be transient for HttpClientFactory
+builder.Services.AddTransient<ApiCallLoggingHandler>();
+
+// Register HttpClient for API services with logging handler
+// Note: AddHttpClient automatically registers the service, so we don't need AddScoped for these
+builder.Services.AddHttpClient<IGeminiService, GeminiService>()
+    .AddHttpMessageHandler<ApiCallLoggingHandler>();
+builder.Services.AddHttpClient<IGeoapifyService, GeoapifyService>()
+    .AddHttpMessageHandler<ApiCallLoggingHandler>();
+builder.Services.AddHttpClient<IMenuScraperService, MenuScraperService>()
+    .AddHttpMessageHandler<ApiCallLoggingHandler>();
+
+// Register application services (non-HttpClient services)
 builder.Services.AddScoped<IAgentOrchestratorService, AgentOrchestratorService>();
-builder.Services.AddScoped<IGeminiService, GeminiService>();
-builder.Services.AddScoped<IGeoapifyService, GeoapifyService>();
 builder.Services.AddScoped<ISimilarBusinessService, SimilarBusinessService>();
-builder.Services.AddScoped<IMenuScraperService, MenuScraperService>();
 
 // Enable CORS for development (SignalR compatible)
 builder.Services.AddCors(options =>

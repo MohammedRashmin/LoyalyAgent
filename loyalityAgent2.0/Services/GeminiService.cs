@@ -267,6 +267,18 @@ REASONING: [explain why this percentage]";
             try
             {
                 var apiKey = _userApiKey ?? _configuration["Gemini:ApiKey"] ?? "";
+                
+                // Validate API key - don't use placeholder values
+                if (string.IsNullOrEmpty(apiKey) || 
+                    apiKey.Contains("your-gemini-api-key-here", StringComparison.OrdinalIgnoreCase) ||
+                    apiKey.Contains("your_api_key", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogError("Invalid or missing Gemini API key. UserApiKey set: {HasUserKey}, ConfigKey: {ConfigKey}", 
+                        !string.IsNullOrEmpty(_userApiKey), 
+                        !string.IsNullOrEmpty(_configuration["Gemini:ApiKey"]));
+                    throw new InvalidOperationException("Gemini API key is not configured. Please set a valid API key.");
+                }
+                
                 var apiUrl = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={apiKey}";
 
                 var requestBody = new GeminiRequest
@@ -310,6 +322,15 @@ REASONING: [explain why this percentage]";
             try
             {
                 var apiKey = _userApiKey ?? _configuration["Gemini:ApiKey"] ?? "";
+                
+                // Validate API key - don't use placeholder values
+                if (string.IsNullOrEmpty(apiKey) || 
+                    apiKey.Contains("your-gemini-api-key-here", StringComparison.OrdinalIgnoreCase) ||
+                    apiKey.Contains("your_api_key", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogError("Invalid or missing Gemini API key for Google Search. Cannot proceed without valid key.");
+                    throw new InvalidOperationException("Gemini API key is not configured. Please set a valid API key.");
+                }
 
                 // Try with Google Search grounding first
                 _logger.LogInformation("Attempting search with Google Search grounding");
@@ -331,7 +352,7 @@ REASONING: [explain why this percentage]";
                     {
                         new
                         {
-                            google_search_retrieval = new { }
+                            google_search = new { }
                         }
                     }
                 };

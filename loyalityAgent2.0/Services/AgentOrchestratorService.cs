@@ -12,6 +12,7 @@ namespace loyalityAgent2._0.Services
         private readonly IMenuScraperService _menuScraperService;
         private readonly ILogger<AgentOrchestratorService> _logger;
         private readonly IHubContext<WorkflowHub> _hubContext;
+        private readonly IConnectionContextService _connectionContext;
 
         public AgentOrchestratorService(
             IGeminiService geminiService,
@@ -19,7 +20,8 @@ namespace loyalityAgent2._0.Services
             ISimilarBusinessService similarBusinessService,
             IMenuScraperService menuScraperService,
             ILogger<AgentOrchestratorService> logger,
-            IHubContext<WorkflowHub> hubContext)
+            IHubContext<WorkflowHub> hubContext,
+            IConnectionContextService connectionContext)
         {
             _geminiService = geminiService;
             _geoapifyService = geoapifyService;
@@ -27,12 +29,17 @@ namespace loyalityAgent2._0.Services
             _menuScraperService = menuScraperService;
             _logger = logger;
             _hubContext = hubContext;
+            _connectionContext = connectionContext;
         }
 
         public async Task<AgentResponse> ProcessBusinessLoyaltyAsync(string userApiKey, string businessName, string category, string fullAddress, decimal minimumSpent, string? connectionId = null)
         {
             try
             {
+                // Set connection ID in context for API call logging
+                _connectionContext.SetConnectionId(connectionId);
+                _logger.LogInformation("Set connection ID for API logging: {ConnectionId}", connectionId ?? "NULL");
+                
                 _geminiService.SetApiKey(userApiKey);
 
                 _logger.LogInformation("Starting loyalty agent workflow for business: {BusinessName}, Min Spend: £{MinSpent}", businessName, minimumSpent);

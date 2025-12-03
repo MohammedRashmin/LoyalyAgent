@@ -216,7 +216,7 @@
 
         .main-layout {
             display: grid;
-            grid-template-columns: 360px 1fr 1fr;
+            grid-template-columns: 360px 1fr 1fr 1fr;
             gap: 0;
             height: calc(100vh - 90px);
             overflow: hidden;
@@ -629,6 +629,140 @@
             background: #a1a1a1;
         }
 
+        /* API Call Styles */
+        .api-call-item {
+            background: #fff;
+            border-left: 4px solid #667eea;
+            padding: 14px 16px;
+            margin-bottom: 12px;
+            border-radius: 0 8px 8px 0;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            transition: all 0.3s ease;
+        }
+
+        .api-call-item:hover {
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .api-call-item.success {
+            border-left-color: #28a745;
+        }
+
+        .api-call-item.error {
+            border-left-color: #dc3545;
+        }
+
+        .api-call-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .api-call-method {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.75em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .api-call-method.get {
+            background: #28a745;
+            color: #fff;
+        }
+
+        .api-call-method.post {
+            background: #007bff;
+            color: #fff;
+        }
+
+        .api-call-method.put {
+            background: #ffc107;
+            color: #000;
+        }
+
+        .api-call-method.delete {
+            background: #dc3545;
+            color: #fff;
+        }
+
+        .api-call-endpoint {
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            color: #333;
+            word-break: break-all;
+            flex: 1;
+            margin-left: 8px;
+        }
+
+        .api-call-status {
+            font-size: 0.75em;
+            font-weight: 600;
+            padding: 4px 8px;
+            border-radius: 4px;
+            background: #f5f5f5;
+        }
+
+        .api-call-status.success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .api-call-status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .api-call-duration {
+            font-size: 0.7em;
+            color: #888;
+            margin-left: 8px;
+        }
+
+        .api-call-body {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.8em;
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .api-call-body-label {
+            font-weight: 600;
+            font-size: 0.75em;
+            color: #667eea;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 6px;
+        }
+
+        .api-call-body-section {
+            margin-bottom: 12px;
+        }
+
+        .api-call-toggle {
+            background: none;
+            border: none;
+            color: #667eea;
+            cursor: pointer;
+            font-size: 0.75em;
+            padding: 4px 8px;
+            margin-top: 6px;
+            text-decoration: underline;
+        }
+
+        .api-call-toggle:hover {
+            color: #764ba2;
+        }
+
         @media (max-width: 1200px) {
             .main-layout {
                 grid-template-columns: 1fr;
@@ -791,6 +925,18 @@
                         <div id="resultsContainer">
                             <div class="no-results">
                                 Results will appear here after analysis
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- API Calls Panel -->
+                <div class="panel">
+                    <div class="panel-header">API Calls</div>
+                    <div class="panel-content">
+                        <div id="apiCallsContainer">
+                            <div class="no-results">
+                                API calls will appear here during analysis
                             </div>
                         </div>
                     </div>
@@ -971,6 +1117,11 @@
                 } else if (progress.step === "ERROR" || progress.Step === "ERROR") {
                     setProcessing(false);
                 }
+            });
+
+            connection.on("ReceiveApiCall", (apiCall) => {
+                console.log("Received API call:", apiCall);
+                addApiCall(apiCall);
             });
 
             try {
@@ -1185,6 +1336,7 @@
 
             document.getElementById('workflowPath').innerHTML = '';
             document.getElementById('resultsContainer').innerHTML = '<div class="no-results">Processing...</div>';
+            document.getElementById('apiCallsContainer').innerHTML = '<div class="no-results">API calls will appear here...</div>';
 
             setProcessing(true);
 
@@ -1229,6 +1381,85 @@
             connection.onclose(() => updateConnectionStatus(false));
             connection.onreconnecting(() => updateConnectionStatus(false));
             connection.onreconnected(() => updateConnectionStatus(true));
+        }
+
+        // API Call Functions
+        function addApiCall(apiCall) {
+            const container = document.getElementById('apiCallsContainer');
+
+            if (container.querySelector('.no-results')) {
+                container.innerHTML = '';
+            }
+
+            const callDiv = document.createElement('div');
+            const statusCode = apiCall.statusCode || 0;
+            const isSuccess = statusCode >= 200 && statusCode < 300;
+            const isError = statusCode >= 400;
+            
+            callDiv.className = `api-call-item ${isSuccess ? 'success' : (isError ? 'error' : '')}`;
+            
+            const method = apiCall.method || 'GET';
+            const endpoint = apiCall.endpoint || 'Unknown';
+            const duration = apiCall.durationMs ? `${apiCall.durationMs}ms` : '';
+            const timestamp = apiCall.timestamp ? new Date(apiCall.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+
+            let html = `
+                <div class="api-call-header">
+                    <span class="api-call-method ${method.toLowerCase()}">${method}</span>
+                    <span class="api-call-endpoint">${escapeHtml(endpoint)}</span>
+                    <span class="api-call-status ${isSuccess ? 'success' : (isError ? 'error' : '')}">${statusCode || 'N/A'}</span>
+                    ${duration ? `<span class="api-call-duration">${duration}</span>` : ''}
+                </div>
+                <div style="font-size: 0.7em; color: #888; margin-bottom: 8px;">${timestamp}</div>
+            `;
+
+            // Add request body if available
+            if (apiCall.requestBody) {
+                const requestId = `request-${Date.now()}-${Math.random()}`;
+                html += `
+                    <div class="api-call-body-section">
+                        <div class="api-call-body-label">Request Body</div>
+                        <button class="api-call-toggle" onclick="toggleApiCallBody('${requestId}')">Show/Hide</button>
+                        <div class="api-call-body" id="${requestId}" style="display: none;">${escapeHtml(formatJson(apiCall.requestBody))}</div>
+                    </div>
+                `;
+            }
+
+            // Add response body if available
+            if (apiCall.responseBody) {
+                const responseId = `response-${Date.now()}-${Math.random()}`;
+                html += `
+                    <div class="api-call-body-section">
+                        <div class="api-call-body-label">Response Body</div>
+                        <button class="api-call-toggle" onclick="toggleApiCallBody('${responseId}')">Show/Hide</button>
+                        <div class="api-call-body" id="${responseId}" style="display: none;">${escapeHtml(formatJson(apiCall.responseBody))}</div>
+                    </div>
+                `;
+            }
+
+            callDiv.innerHTML = html;
+            container.insertBefore(callDiv, container.firstChild);
+            
+            // Keep only last 50 API calls
+            while (container.children.length > 50) {
+                container.removeChild(container.lastChild);
+            }
+        }
+
+        function toggleApiCallBody(id) {
+            const body = document.getElementById(id);
+            if (body) {
+                body.style.display = body.style.display === 'none' ? 'block' : 'none';
+            }
+        }
+
+        function formatJson(text) {
+            try {
+                const obj = JSON.parse(text);
+                return JSON.stringify(obj, null, 2);
+            } catch (e) {
+                return text;
+            }
         }
 
         // Initialize app on load
