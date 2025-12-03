@@ -82,6 +82,7 @@ Target customers: {businessAttributes.TargetAudience}
 Business type: {businessAttributes.BusinessModel}
 Specialization: {businessAttributes.SpecializationKeywords}
 Location: UK (prices in British Pounds £)
+Minimum Spend Per Token: £{minimumSpent}
 
 TASK: Suggest a WELCOME GIFT - a truly FREE item given to new customers with NO purchase required.
 
@@ -91,21 +92,26 @@ IMPORTANT:
 - If you cannot identify specific products from their actual menu, respond with: NO MENU ITEMS FOUND
 
 WELCOME GIFT CRITERIA:
-- Must be small/affordable (typically under £3-5) so business can give it free
+- CRITICAL: Price MUST be ≤ £{minimumSpent} (the minimum spend per token)
+  - This is a truly FREE gift (no purchase required)
+  - Business cannot afford items worth more than what a customer typically spends in one visit
+  - If minimum spend is £{minimumSpent}, welcome gift MUST be ≤ £{minimumSpent}
+- Ideally should be small/affordable (typically £3-5 or less) so business can give it free
 - Must be from their ACTUAL menu
 - Should be representative of their business (e.g., coffee shop → small coffee/pastry)
 - Should create good first impression without significant cost to business
+- DO NOT suggest items above £{minimumSpent} - they are not sustainable as free welcome gifts
 
 If you can find specific menu items:
 List ALL products with ESTIMATED prices in GBP (£).
-Find the SMALLEST/MOST AFFORDABLE items suitable as free welcome gifts.
+Find the SMALLEST/MOST AFFORDABLE items suitable as free welcome gifts (MUST be ≤ £{minimumSpent}).
 Recommend ONE small, affordable product from their ACTUAL MENU to give as WELCOME GIFT (no purchase required).
 
 Format:
 PRODUCTS: Product1 - £X.XX, Product2 - £Y.YY
 POPULAR: [list]
-SMALL ITEMS UNDER £5: Product A - £X.XX, Product B - £Y.YY
-RECOMMENDED WELCOME GIFT: ProductName - £Z.ZZ";
+SMALL ITEMS ≤ £{minimumSpent}: Product A - £X.XX, Product B - £Y.YY
+RECOMMENDED WELCOME GIFT: ProductName - £Z.ZZ (MUST be ≤ £{minimumSpent})";
 
                 var response = await GeneratePromptAsync(prompt);
                 _logger.LogInformation("Welcome Gift Analysis Response: {Response}", response);
@@ -1145,16 +1151,23 @@ Use realistic pricing for {address} area.";
                 
                 var prompt = $@"Business: {businessAttributes.BusinessModel}
 Available Products: {products}
-Minimum Spend: £{minimumSpent}
+Minimum Spend Per Token: £{minimumSpent}
+
+CRITICAL CONSTRAINT: Welcome gift price MUST be ≤ £{minimumSpent} (the minimum spend per token).
+- This is a truly FREE gift (no purchase required)
+- Business cannot afford to give away items worth more than what a customer typically spends in one visit
+- If minimum spend is £{minimumSpent}, welcome gift should be ≤ £{minimumSpent} (ideally much less, like £3-5)
 
 TASK: Select the BEST welcome gift (truly free, no purchase required).
-- Must be small/affordable (typically under £3-5)
+- MUST be ≤ £{minimumSpent} (this is REQUIRED, not optional)
+- Ideally should be small/affordable (typically £3-5 or less)
 - Must be from the available products
 - Should create good first impression
+- If no products are ≤ £{minimumSpent}, select the cheapest available product
 
 Format:
-SELECTED: ProductName - £X.XX
-REASONING: [explain why]";
+SELECTED: ProductName - £X.XX (MUST be ≤ £{minimumSpent})
+REASONING: [explain why, including why the price is affordable for the business]";
 
                 var response = await GeneratePromptAsync(prompt);
                 
@@ -1164,21 +1177,44 @@ REASONING: [explain why]";
 
                 if (selectedMatch.Success && decimal.TryParse(selectedMatch.Groups[2].Value, out var price))
                 {
-                    return new WelcomeGiftResponse
+                    // Validate price doesn't exceed minimum spend
+                    if (price > minimumSpent)
                     {
-                        ItemName = selectedMatch.Groups[1].Value.Trim(),
-                        ItemPriceGBP = price,
-                        Description = $"Welcome! Get one {selectedMatch.Groups[1].Value.Trim()} absolutely FREE - no purchase required!",
-                        Reasoning = reasoningMatch.Success ? reasoningMatch.Groups[1].Value.Trim() : "Selected as best welcome gift",
-                        IsFree = true
-                    };
+                        _logger.LogWarning("AI suggested welcome gift price £{Price} exceeds minimum spend £{MinSpend}. Finding cheaper alternative.", 
+                            price, minimumSpent);
+                    }
+                    else
+                    {
+                        return new WelcomeGiftResponse
+                        {
+                            ItemName = selectedMatch.Groups[1].Value.Trim(),
+                            ItemPriceGBP = price,
+                            Description = $"Welcome! Get one {selectedMatch.Groups[1].Value.Trim()} absolutely FREE - no purchase required!",
+                            Reasoning = reasoningMatch.Success ? reasoningMatch.Groups[1].Value.Trim() : "Selected as best welcome gift",
+                            IsFree = true
+                        };
+                    }
                 }
 
-                // Fallback to first affordable product
+                // Fallback: Find affordable product that doesn't exceed minimum spend
                 var affordableProduct = productAnalysis.AllProducts
-                    .Where(p => p.PriceGBP <= 5)
+                    .Where(p => p.PriceGBP <= minimumSpent) // Must be ≤ minimum spend
                     .OrderBy(p => p.PriceGBP)
                     .FirstOrDefault();
+                
+                // If no product is ≤ minimum spend, get the cheapest available (but log warning)
+                if (affordableProduct == null)
+                {
+                    affordableProduct = productAnalysis.AllProducts
+                        .OrderBy(p => p.PriceGBP)
+                        .FirstOrDefault();
+                    
+                    if (affordableProduct != null && affordableProduct.PriceGBP > minimumSpent)
+                    {
+                        _logger.LogWarning("No products found ≤ minimum spend £{MinSpend}. Using cheapest available: £{Price}. This may not be sustainable.", 
+                            minimumSpent, affordableProduct.PriceGBP);
+                    }
+                }
 
                 if (affordableProduct != null)
                 {
@@ -1192,25 +1228,32 @@ REASONING: [explain why]";
                     };
                 }
 
-                // Ultimate fallback
+                // Ultimate fallback: Use a default price that's affordable (min of £2 or 20% of minimum spend)
+                var defaultPrice = Math.Min(2.00m, minimumSpent * 0.2m);
+                if (defaultPrice < 0.50m) defaultPrice = 0.50m; // Minimum £0.50
+                
                 return new WelcomeGiftResponse
                 {
                     ItemName = "Welcome Gift",
-                    ItemPriceGBP = 2.00m,
+                    ItemPriceGBP = defaultPrice,
                     Description = "Welcome! Get a free welcome gift on your first visit!",
-                    Reasoning = "Default welcome gift",
+                    Reasoning = $"Default welcome gift (affordable at £{defaultPrice:F2}, well below minimum spend of £{minimumSpent})",
                     IsFree = true
                 };
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error generating welcome gift");
+                // Default fallback: Use affordable price (min of £2 or 20% of minimum spend)
+                var defaultPrice = Math.Min(2.00m, minimumSpent * 0.2m);
+                if (defaultPrice < 0.50m) defaultPrice = 0.50m; // Minimum £0.50
+                
                 return new WelcomeGiftResponse
                 {
                     ItemName = "Welcome Gift",
-                    ItemPriceGBP = 2.00m,
+                    ItemPriceGBP = defaultPrice,
                     Description = "Welcome! Get a free welcome gift!",
-                    Reasoning = "Default welcome gift",
+                    Reasoning = $"Default welcome gift (affordable at £{defaultPrice:F2}, well below minimum spend of £{minimumSpent})",
                     IsFree = true
                 };
             }
@@ -1259,34 +1302,183 @@ Core Offerings: {businessAttributes.CoreProductsOrServices}
 
 LOYALTY TIER SYSTEM:
 - Customer earns 1 token per £{minimumSpendForToken} spent
-- Bronze: 3 tokens (total spend: £{minimumSpendForToken * 3}) - Lower-value items (£3-£8)
-- Silver: 5 tokens (total spend: £{minimumSpendForToken * 5}) - Medium-value items (£8-£15)
-- Gold: 7 tokens (total spend: £{minimumSpendForToken * 7}) - Higher-value items (£15-£25)
+- CRITICAL PROFIT REQUIREMENT: Business must make minimum 75% profit margin on each tier reward
+- Token count calculation: Token Count = Ceiling((Product Price × 4) ÷ £{minimumSpendForToken})
+  - This ensures: Total Customer Spend = Tokens × £{minimumSpendForToken}
+  - Business Profit = Total Customer Spend - Product Price
+  - Profit Margin = (Profit ÷ Total Spend) × 100, must be ≥ 75%
+  - Formula explanation: For 75% margin, Total Spend = Product Price × 4 (so profit = 3× product price)
 
-TASK: Analyze ALL 3 tiers together and suggest rewards for each.
+PROFIT CALCULATION EXAMPLES:
+- Product £10, Min Spend £25: Tokens = Ceiling(£40 ÷ £25) = 2 tokens → Customer spends £50, Profit = £40 (80% margin) ✓
+- Product £15, Min Spend £25: Tokens = Ceiling(£60 ÷ £25) = 3 tokens → Customer spends £75, Profit = £60 (80% margin) ✓
+- Product £20, Min Spend £25: Tokens = Ceiling(£80 ÷ £25) = 4 tokens → Customer spends £100, Profit = £80 (80% margin) ✓
 
-Format for EACH tier:
+TASK: 
+1. For each tier, select a product from the available menu
+2. Calculate the REQUIRED token count based on: Ceiling((Product Price × 4) ÷ £{minimumSpendForToken})
+3. Verify profit margin is ≥ 75% (if not, adjust product selection or token count)
+4. Ensure token counts are progressive: Bronze < Silver < Gold (all ≤ 10)
+
+IMPORTANT TOKEN COUNT GUIDELINES:
+- DO NOT use the same token counts for every business - vary them based on the business analysis
+- Bronze: Should be accessible (typically 2-4 tokens, but can be 1-5) - for customers who visit occasionally
+- Silver: Should be moderate (typically 4-7 tokens, but can be 3-8) - for regular customers  
+- Gold: Should be premium (typically 7-10 tokens, but can be 5-10) - for loyal, frequent customers
+- All token counts MUST be 10 or less
+- Token counts should be progressive (Bronze < Silver < Gold)
+- Consider: For expensive businesses (high average item price), use lower token counts. For affordable businesses, use higher token counts.
+- Consider: For frequent-visit businesses (coffee shops), use lower token counts. For occasional-visit businesses (restaurants), use higher token counts.
+- VARY THE TOKEN COUNTS - do not always use 3, 5, 7 or 3, 6, 9. Think about what makes sense for THIS specific business.
+
+CRITICAL: You MUST provide token counts. This is REQUIRED, not optional.
+
+Format for response (YOU MUST FOLLOW THIS EXACT FORMAT):
 BRONZE_TIER:
 ITEM: ItemName1 - £X.XX
+CALCULATED_TOKENS: [calculate: Ceiling((Item Price × 4) ÷ £{minimumSpendForToken})]
+TOTAL_CUSTOMER_SPEND: [Tokens × £{minimumSpendForToken}]
+PROFIT: [Total Spend - Item Price]
+PROFIT_MARGIN: [Profit ÷ Total Spend × 100]% (must be ≥ 75%)
 CAN_BE_FREE: YES/NO
-REASONING: [explanation]
+REASONING: [explanation including profit calculation and why this works for the business]
 
 SILVER_TIER:
 ITEM: ItemName1 - £X.XX
+CALCULATED_TOKENS: [calculate: Ceiling((Item Price × 4) ÷ £{minimumSpendForToken}), must be > Bronze tokens]
+TOTAL_CUSTOMER_SPEND: [Tokens × £{minimumSpendForToken}]
+PROFIT: [Total Spend - Item Price]
+PROFIT_MARGIN: [Profit ÷ Total Spend × 100]% (must be ≥ 75%)
 CAN_BE_FREE: YES/NO
-REASONING: [explanation]
+REASONING: [explanation including profit calculation and why this works for the business]
 
 GOLD_TIER:
 ITEM: ItemName1 - £X.XX
+CALCULATED_TOKENS: [calculate: Ceiling((Item Price × 4) ÷ £{minimumSpendForToken}), must be > Silver tokens]
+TOTAL_CUSTOMER_SPEND: [Tokens × £{minimumSpendForToken}]
+PROFIT: [Total Spend - Item Price]
+PROFIT_MARGIN: [Profit ÷ Total Spend × 100]% (must be ≥ 75%)
 CAN_BE_FREE: YES/NO
-REASONING: [explanation]";
+REASONING: [explanation including profit calculation and why this works for the business]";
 
                 var response = await GeneratePromptAsync(prompt);
                 
-                // Parse all tiers from response
-                var bronzeReward = ParseTierFromCombinedResponse(response, LoyaltyTier.Bronze, 3, 10m);
-                var silverReward = ParseTierFromCombinedResponse(response, LoyaltyTier.Silver, 5, 20m);
-                var goldReward = ParseTierFromCombinedResponse(response, LoyaltyTier.Gold, 7, 40m);
+                // Log the raw response for debugging
+                _logger.LogInformation("Raw AI response for token counts (first 1000 chars): {Response}", 
+                    response.Substring(0, Math.Min(1000, response.Length)));
+                
+                // Parse token counts from response first - prioritize CALCULATED_TOKENS from tier sections
+                var bronzeTokensMatch = Regex.Match(response, @"BRONZE_TIER:.*?CALCULATED_TOKENS:\s*(\d+)", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+                var silverTokensMatch = Regex.Match(response, @"SILVER_TIER:.*?CALCULATED_TOKENS:\s*(\d+)", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+                var goldTokensMatch = Regex.Match(response, @"GOLD_TIER:.*?CALCULATED_TOKENS:\s*(\d+)", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+                
+                var bronzeTokens = bronzeTokensMatch.Success && int.TryParse(bronzeTokensMatch.Groups[1].Value, out var b) ? b : 0;
+                var silverTokens = silverTokensMatch.Success && int.TryParse(silverTokensMatch.Groups[1].Value, out var s) ? s : 0;
+                var goldTokens = goldTokensMatch.Success && int.TryParse(goldTokensMatch.Groups[1].Value, out var g) ? g : 0;
+                
+                // If not found in new format, try old parsing method
+                if (bronzeTokens == 0 || silverTokens == 0 || goldTokens == 0)
+                {
+                    var parsed = ParseTokenCountsFromResponse(response);
+                    if (bronzeTokens == 0) bronzeTokens = parsed.bronzeTokens;
+                    if (silverTokens == 0) silverTokens = parsed.silverTokens;
+                    if (goldTokens == 0) goldTokens = parsed.goldTokens;
+                }
+                
+                // Validate token counts (must be ≤ 10 and progressive)
+                // Only validate if we actually got values from AI, otherwise log warning
+                if (bronzeTokens == 0 || silverTokens == 0 || goldTokens == 0)
+                {
+                    _logger.LogWarning("AI did not provide token counts in expected format. Response snippet: {Snippet}", 
+                        response.Substring(0, Math.Min(500, response.Length)));
+                }
+                
+                bronzeTokens = Math.Min(Math.Max(bronzeTokens, 1), 10); // Ensure 1-10
+                silverTokens = Math.Min(Math.Max(silverTokens, bronzeTokens + 1), 10); // Must be > Bronze, max 10
+                goldTokens = Math.Min(Math.Max(goldTokens, silverTokens + 1), 10); // Must be > Silver, max 10
+                
+                _logger.LogInformation("Final token counts after validation - Bronze: {Bronze}, Silver: {Silver}, Gold: {Gold}", 
+                    bronzeTokens, silverTokens, goldTokens);
+                
+                // Parse all tiers from response with AI-suggested token counts
+                // If tokens are still 0 or invalid, calculate based on typical product prices
+                if (bronzeTokens == 0 || bronzeTokens > 10) bronzeTokens = 3; // Default for bronze
+                if (silverTokens == 0 || silverTokens > 10 || silverTokens <= bronzeTokens) silverTokens = bronzeTokens + 2;
+                if (goldTokens == 0 || goldTokens > 10 || goldTokens <= silverTokens) goldTokens = silverTokens + 2;
+                
+                // Ensure all are within 10
+                bronzeTokens = Math.Min(bronzeTokens, 10);
+                silverTokens = Math.Min(silverTokens, 10);
+                goldTokens = Math.Min(goldTokens, 10);
+                
+                _logger.LogInformation("Using token counts for parsing - Bronze: {Bronze}, Silver: {Silver}, Gold: {Gold}", 
+                    bronzeTokens, silverTokens, goldTokens);
+                
+                var bronzeReward = ParseTierFromCombinedResponse(response, LoyaltyTier.Bronze, bronzeTokens, 10m, minimumSpendForToken);
+                var silverReward = ParseTierFromCombinedResponse(response, LoyaltyTier.Silver, silverTokens, 20m, minimumSpendForToken);
+                var goldReward = ParseTierFromCombinedResponse(response, LoyaltyTier.Gold, goldTokens, 40m, minimumSpendForToken);
+                
+                // After parsing, ALWAYS recalculate tokens based on actual product prices
+                // This ensures tokens are correct even if AI didn't provide them
+                foreach (var reward in new[] { bronzeReward, silverReward, goldReward })
+                {
+                    var freeItems = reward.RewardOptions.Where(o => o.CanBeGivenFree).ToList();
+                    if (freeItems.Any())
+                    {
+                        // Use the first free item to calculate tokens (or average if multiple)
+                        var avgPrice = freeItems.Average(i => i.ItemValueGBP);
+                        
+                        // Calculate tokens based on product price: Ceiling((Price × 2) ÷ MinSpend)
+                        // This ensures 75% minimum profit margin (Total Spend = Price × 4, Profit = Price × 3)
+                        var calculatedTokens = (int)Math.Ceiling((avgPrice * 4) / minimumSpendForToken);
+                        calculatedTokens = Math.Min(Math.Max(calculatedTokens, 1), 10);
+                        
+                        _logger.LogInformation("Recalculating tokens for {Tier} based on product price £{Price}: {OldTokens} -> {NewTokens}", 
+                            reward.Tier, avgPrice, reward.RequiredTokens, calculatedTokens);
+                        
+                        reward.RequiredTokens = calculatedTokens;
+                        
+                        // Recalculate profit for ALL items in this tier with correct tokens
+                        foreach (var item in freeItems)
+                        {
+                            // Always recalculate based on the tier's token count
+                            item.TotalCustomerSpend = calculatedTokens * minimumSpendForToken;
+                            item.BusinessProfit = item.TotalCustomerSpend - item.ItemValueGBP;
+                            item.ProfitMarginPercentage = item.TotalCustomerSpend > 0 ? (item.BusinessProfit / item.TotalCustomerSpend) * 100 : 0;
+                            
+                            var visitsText = calculatedTokens == 1 ? "visit" : "visits";
+                            var tokensText = calculatedTokens == 1 ? "token" : "tokens";
+                            item.ProfitJustification = $"Customer needs {calculatedTokens} {visitsText} (spending £{item.TotalCustomerSpend:F2} total at £{minimumSpendForToken:F2} per visit) to earn {calculatedTokens} {tokensText}, then gets free {item.ItemName} (£{item.ItemValueGBP:F2}). Business profit: £{item.BusinessProfit:F2} ({item.ProfitMarginPercentage:F1}% margin).";
+                        }
+                    }
+                }
+                
+                // Ensure tiers are progressive (Bronze < Silver < Gold)
+                if (bronzeReward.RequiredTokens >= silverReward.RequiredTokens)
+                {
+                    silverReward.RequiredTokens = Math.Min(bronzeReward.RequiredTokens + 1, 10);
+                    _logger.LogInformation("Adjusted Silver tokens to be > Bronze: {Tokens}", silverReward.RequiredTokens);
+                }
+                if (silverReward.RequiredTokens >= goldReward.RequiredTokens)
+                {
+                    goldReward.RequiredTokens = Math.Min(silverReward.RequiredTokens + 1, 10);
+                    _logger.LogInformation("Adjusted Gold tokens to be > Silver: {Tokens}", goldReward.RequiredTokens);
+                }
+                
+                // Recalculate profits again after ensuring progression
+                foreach (var reward in new[] { bronzeReward, silverReward, goldReward })
+                {
+                    foreach (var item in reward.RewardOptions.Where(o => o.CanBeGivenFree))
+                    {
+                        item.TotalCustomerSpend = reward.RequiredTokens * minimumSpendForToken;
+                        item.BusinessProfit = item.TotalCustomerSpend - item.ItemValueGBP;
+                        item.ProfitMarginPercentage = item.TotalCustomerSpend > 0 ? (item.BusinessProfit / item.TotalCustomerSpend) * 100 : 0;
+                        
+                        var visitsText = reward.RequiredTokens == 1 ? "visit" : "visits";
+                        var tokensText = reward.RequiredTokens == 1 ? "token" : "tokens";
+                        item.ProfitJustification = $"Customer needs {reward.RequiredTokens} {visitsText} (spending £{item.TotalCustomerSpend:F2} total at £{minimumSpendForToken:F2} per visit) to earn {reward.RequiredTokens} {tokensText}, then gets free {item.ItemName} (£{item.ItemValueGBP:F2}). Business profit: £{item.BusinessProfit:F2} ({item.ProfitMarginPercentage:F1}% margin).";
+                    }
+                }
 
                 analysis.TierRewards.Add(bronzeReward);
                 analysis.TierRewards.Add(silverReward);
@@ -1305,7 +1497,80 @@ REASONING: [explanation]";
             }
         }
 
-        private LoyaltyTierReward ParseTierFromCombinedResponse(string text, LoyaltyTier tier, int tokens, decimal fallbackDiscount)
+        private (int bronzeTokens, int silverTokens, int goldTokens) ParseTokenCountsFromResponse(string text)
+        {
+            _logger.LogInformation("Parsing token counts from AI response. Response length: {Length}", text.Length);
+            
+            // Try multiple patterns to find token counts
+            
+            // Pattern 1: TOKEN_COUNTS section with explicit labels
+            var tokenCountsMatch = Regex.Match(text, 
+                @"TOKEN_COUNTS:.*?BRONZE_TOKENS:\s*(\d+).*?SILVER_TOKENS:\s*(\d+).*?GOLD_TOKENS:\s*(\d+)",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            
+            if (tokenCountsMatch.Success && 
+                int.TryParse(tokenCountsMatch.Groups[1].Value, out var bronze) &&
+                int.TryParse(tokenCountsMatch.Groups[2].Value, out var silver) &&
+                int.TryParse(tokenCountsMatch.Groups[3].Value, out var gold))
+            {
+                _logger.LogInformation("Found token counts in TOKEN_COUNTS section: Bronze={Bronze}, Silver={Silver}, Gold={Gold}", bronze, silver, gold);
+                return (bronze, silver, gold);
+            }
+            
+            // Pattern 2: Individual tier sections with CALCULATED_TOKENS or TOKENS field
+            var bronzeMatch = Regex.Match(text, @"BRONZE_TIER:.*?(?:CALCULATED_TOKENS|TOKENS):\s*(\d+)", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            var silverMatch = Regex.Match(text, @"SILVER_TIER:.*?(?:CALCULATED_TOKENS|TOKENS):\s*(\d+)", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            var goldMatch = Regex.Match(text, @"GOLD_TIER:.*?(?:CALCULATED_TOKENS|TOKENS):\s*(\d+)", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            
+            var bronzeTokens = bronzeMatch.Success && int.TryParse(bronzeMatch.Groups[1].Value, out var b) ? b : 0;
+            var silverTokens = silverMatch.Success && int.TryParse(silverMatch.Groups[1].Value, out var s) ? s : 0;
+            var goldTokens = goldMatch.Success && int.TryParse(goldMatch.Groups[1].Value, out var g) ? g : 0;
+            
+            if (bronzeTokens > 0 || silverTokens > 0 || goldTokens > 0)
+            {
+                _logger.LogInformation("Found token counts in tier sections: Bronze={Bronze}, Silver={Silver}, Gold={Gold}", 
+                    bronzeTokens > 0 ? bronzeTokens : 0, silverTokens > 0 ? silverTokens : 0, goldTokens > 0 ? goldTokens : 0);
+            }
+            
+            // Pattern 3: Look for any numbers near "Bronze", "Silver", "Gold" and "token"
+            if (bronzeTokens == 0 || silverTokens == 0 || goldTokens == 0)
+            {
+                var bronzePattern = Regex.Match(text, @"(?:Bronze|BRONZE).*?(?:token|Token).*?(\d+)", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+                var silverPattern = Regex.Match(text, @"(?:Silver|SILVER).*?(?:token|Token).*?(\d+)", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+                var goldPattern = Regex.Match(text, @"(?:Gold|GOLD).*?(?:token|Token).*?(\d+)", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+                
+                if (bronzeTokens == 0 && bronzePattern.Success && int.TryParse(bronzePattern.Groups[1].Value, out var b2))
+                {
+                    bronzeTokens = b2;
+                    _logger.LogInformation("Found Bronze tokens via pattern matching: {Tokens}", bronzeTokens);
+                }
+                if (silverTokens == 0 && silverPattern.Success && int.TryParse(silverPattern.Groups[1].Value, out var s2))
+                {
+                    silverTokens = s2;
+                    _logger.LogInformation("Found Silver tokens via pattern matching: {Tokens}", silverTokens);
+                }
+                if (goldTokens == 0 && goldPattern.Success && int.TryParse(goldPattern.Groups[1].Value, out var g2))
+                {
+                    goldTokens = g2;
+                    _logger.LogInformation("Found Gold tokens via pattern matching: {Tokens}", goldTokens);
+                }
+            }
+            
+            // If we still don't have all tokens, use defaults but log a warning
+            if (bronzeTokens == 0) bronzeTokens = 3;
+            if (silverTokens == 0) silverTokens = 5;
+            if (goldTokens == 0) goldTokens = 7;
+            
+            if (bronzeTokens == 3 && silverTokens == 5 && goldTokens == 7)
+            {
+                _logger.LogWarning("Using DEFAULT token counts (3, 5, 7) - AI did not provide token suggestions. Response snippet: {Snippet}", 
+                    text.Substring(0, Math.Min(500, text.Length)));
+            }
+            
+            return (bronzeTokens, silverTokens, goldTokens);
+        }
+
+        private LoyaltyTierReward ParseTierFromCombinedResponse(string text, LoyaltyTier tier, int tokens, decimal fallbackDiscount, decimal minimumSpendForToken)
         {
             var tierName = tier.ToString().ToUpper() + "_TIER";
             var tierSection = System.Text.RegularExpressions.Regex.Match(text, $@"{tierName}:(.+?)(?=\w+_TIER:|$)", 
@@ -1317,12 +1582,27 @@ REASONING: [explanation]";
             }
 
             var sectionText = tierSection.Groups[1].Value;
+            
+            // Try to extract token count from the tier section if present (CALCULATED_TOKENS or TOKENS)
+            var tokenMatch = Regex.Match(sectionText, @"(?:CALCULATED_TOKENS|TOKENS):\s*(\d+)", RegexOptions.IgnoreCase);
+            if (tokenMatch.Success && int.TryParse(tokenMatch.Groups[1].Value, out var extractedTokens))
+            {
+                tokens = Math.Min(Math.Max(extractedTokens, 1), 10); // Ensure 1-10
+                _logger.LogInformation("Extracted token count for {Tier}: {Tokens}", tier, tokens);
+            }
+            
             var reward = new LoyaltyTierReward
             {
                 Tier = tier,
                 RequiredTokens = tokens,
                 RewardOptions = new List<TierRewardOption>()
             };
+
+            // Try to extract profit information from the tier section
+            var calculatedTokensMatch = Regex.Match(sectionText, @"CALCULATED_TOKENS:\s*(\d+)", RegexOptions.IgnoreCase);
+            var totalSpendMatch = Regex.Match(sectionText, @"TOTAL_CUSTOMER_SPEND:\s*£?([\d.]+)", RegexOptions.IgnoreCase);
+            var profitMatch = Regex.Match(sectionText, @"PROFIT:\s*£?([\d.]+)", RegexOptions.IgnoreCase);
+            var profitMarginMatch = Regex.Match(sectionText, @"PROFIT_MARGIN:\s*([\d.]+)%?", RegexOptions.IgnoreCase);
 
             var itemMatches = System.Text.RegularExpressions.Regex.Matches(sectionText, 
                 @"ITEM:\s*([^-£\n]+)\s*-\s*£?([\d.]+).*?CAN_BE_FREE:\s*(YES|NO).*?REASONING:\s*(.+?)(?=ITEM:|$)",
@@ -1332,14 +1612,73 @@ REASONING: [explanation]";
             {
                 if (decimal.TryParse(match.Groups[2].Value, out var price))
                 {
+                    // Use calculated tokens if available, otherwise use the tokens parameter
+                    var itemTokens = tokens;
+                    if (calculatedTokensMatch.Success && int.TryParse(calculatedTokensMatch.Groups[1].Value, out var calcTokens))
+                    {
+                        itemTokens = calcTokens;
+                        tokens = itemTokens; // Update the reward's token count
+                    }
+                    
+                    // Calculate profit information - ALWAYS calculate based on actual tokens and min spend
+                    // Don't trust AI-provided totalSpend if it seems wrong
+                    decimal totalSpend = itemTokens * minimumSpendForToken; // Always calculate from tokens
+                    decimal profit = totalSpend - price;
+                    decimal profitMargin = totalSpend > 0 ? (profit / totalSpend) * 100 : 0;
+                    
+                    // Validate AI-provided values - only use if they make sense
+                    if (totalSpendMatch.Success && decimal.TryParse(totalSpendMatch.Groups[1].Value, out var aiTotalSpend))
+                    {
+                        // Only use AI value if it's close to our calculation (within 10%)
+                        var expectedSpend = itemTokens * minimumSpendForToken;
+                        if (Math.Abs(aiTotalSpend - expectedSpend) < expectedSpend * 0.1m)
+                        {
+                            totalSpend = aiTotalSpend;
+                            profit = totalSpend - price;
+                            profitMargin = totalSpend > 0 ? (profit / totalSpend) * 100 : 0;
+                        }
+                        else
+                        {
+                            _logger.LogWarning("AI provided totalSpend £{AISpend} but expected £{Expected} for {Tokens} tokens. Using calculated value.", 
+                                aiTotalSpend, expectedSpend, itemTokens);
+                        }
+                    }
+                    
+                    // Validate profit - ensure it's positive (at least 75% margin)
+                    if (profit < 0 || profitMargin < 75)
+                    {
+                        _logger.LogWarning("Profit calculation shows negative profit or <75% margin for {Tier} tier: Product £{Price}, Tokens {Tokens}, Total Spend £{TotalSpend}, Profit £{Profit}, Margin {Margin}%", 
+                            tier, price, itemTokens, totalSpend, profit, profitMargin);
+                    }
+                    
+                    // Build profit justification text
+                    var profitJustification = $"Customer needs {itemTokens} visit(s) (spending £{totalSpend:F2} total) to earn {itemTokens} token(s), then gets free {match.Groups[1].Value.Trim()} (£{price:F2}). Business profit: £{profit:F2} ({profitMargin:F1}% margin).";
+                    
                     reward.RewardOptions.Add(new TierRewardOption
                     {
                         ItemName = match.Groups[1].Value.Trim(),
                         ItemValueGBP = price,
                         CanBeGivenFree = match.Groups[3].Value.Trim().Equals("YES", StringComparison.OrdinalIgnoreCase),
-                        ReasoningForSelection = match.Groups[4].Value.Trim()
+                        ReasoningForSelection = match.Groups[4].Value.Trim(),
+                        TotalCustomerSpend = totalSpend,
+                        BusinessProfit = profit,
+                        ProfitMarginPercentage = profitMargin,
+                        ProfitJustification = profitJustification
                     });
                 }
+            }
+            
+            // Update reward's token count if we found calculated tokens in the section
+            if (calculatedTokensMatch.Success && int.TryParse(calculatedTokensMatch.Groups[1].Value, out var finalTokens))
+            {
+                reward.RequiredTokens = Math.Min(Math.Max(finalTokens, 1), 10);
+                _logger.LogInformation("Updated {Tier} tier token count from section: {Tokens}", tier, reward.RequiredTokens);
+            }
+            else
+            {
+                // Use the tokens parameter passed to this method
+                reward.RequiredTokens = tokens;
+                _logger.LogInformation("Using token count from parameter for {Tier} tier: {Tokens}", tier, tokens);
             }
 
             if (!reward.RewardOptions.Any(r => r.CanBeGivenFree))
@@ -1684,7 +2023,7 @@ RECOMMENDED FREE: ProductName - £Z.ZZ";
             }
         }
 
-        public async Task<LoyaltyTierAnalysis> GenerateDiscountOnlyTiersAsync(BusinessAttributes businessAttributes, ProductAnalysisResult? productAnalysis, ServiceAnalysisResult? serviceAnalysis, decimal minimumSpendForToken)
+        public async Task<LoyaltyTierAnalysis> GenerateDiscountOnlyTiersAsync(BusinessAttributes businessAttributes, ProductAnalysisResult? productAnalysis, ServiceAnalysisResult? serviceAnalysis, decimal minimumSpendForToken, CompleteBusinessData? similarBusinessData = null)
         {
             try
             {
@@ -1698,17 +2037,182 @@ RECOMMENDED FREE: ProductName - £Z.ZZ";
                     OverallStrategy = "Token-based loyalty program with tier-based discount rewards (real business found but insufficient data for free items)"
                 };
 
-                // Define tier requirements with discount only
+                // STEP 1: Extract discount percentages from similar business (if available) - PRIORITY
+                decimal? bronzeDiscount = null, silverDiscount = null, goldDiscount = null;
+                string? discountSource = null;
+                
+                if (similarBusinessData != null)
+                {
+                    _logger.LogInformation("Found similar business: {Name}, extracting discount percentages", similarBusinessData.Business.BusinessName);
+                    
+                    var similarBronze = similarBusinessData.TierRewards.FirstOrDefault(t => t.Tier == LoyaltyTier.Bronze);
+                    var similarSilver = similarBusinessData.TierRewards.FirstOrDefault(t => t.Tier == LoyaltyTier.Silver);
+                    var similarGold = similarBusinessData.TierRewards.FirstOrDefault(t => t.Tier == LoyaltyTier.Gold);
+                    
+                    if (similarBronze?.FallbackDiscountPercentage.HasValue == true)
+                    {
+                        bronzeDiscount = similarBronze.FallbackDiscountPercentage.Value;
+                        _logger.LogInformation("Extracted Bronze discount from similar business: {Discount}%", bronzeDiscount);
+                    }
+                    if (similarSilver?.FallbackDiscountPercentage.HasValue == true)
+                    {
+                        silverDiscount = similarSilver.FallbackDiscountPercentage.Value;
+                        _logger.LogInformation("Extracted Silver discount from similar business: {Discount}%", silverDiscount);
+                    }
+                    if (similarGold?.FallbackDiscountPercentage.HasValue == true)
+                    {
+                        goldDiscount = similarGold.FallbackDiscountPercentage.Value;
+                        _logger.LogInformation("Extracted Gold discount from similar business: {Discount}%", goldDiscount);
+                    }
+                    
+                    if (bronzeDiscount.HasValue || silverDiscount.HasValue || goldDiscount.HasValue)
+                    {
+                        discountSource = $"Based on similar {similarBusinessData.Business.Category} in your area";
+                    }
+                }
+
+                // STEP 2: Ask AI to suggest token counts for discount-only tiers
+                var tokenPrompt = $@"Business: {businessAttributes.BusinessModel}
+Business Type: {businessAttributes.BusinessType}
+Core Offerings: {businessAttributes.CoreProductsOrServices}
+Customer earns 1 token per £{minimumSpendForToken} spent
+
+TASK: Suggest appropriate token counts for a discount-only loyalty program (all tokens must be ≤ 10):
+- Bronze: Should be accessible (typically 2-4 tokens) - for occasional customers
+- Silver: Should be moderate (typically 4-7 tokens) - for regular customers  
+- Gold: Should be premium (typically 7-10 tokens) - for loyal customers
+
+Respond in this format:
+BRONZE_TOKENS: [number 1-10]
+SILVER_TOKENS: [number 1-10, must be > Bronze]
+GOLD_TOKENS: [number 1-10, must be > Silver]";
+
+                var tokenResponse = await GeneratePromptAsync(tokenPrompt);
+                var (bronzeTokens, silverTokens, goldTokens) = ParseTokenCountsFromResponse(tokenResponse);
+                
+                // Validate token counts
+                bronzeTokens = Math.Min(Math.Max(bronzeTokens, 2), 10);
+                silverTokens = Math.Min(Math.Max(silverTokens, bronzeTokens + 1), 10);
+                goldTokens = Math.Min(Math.Max(goldTokens, silverTokens + 1), 10);
+                
+                _logger.LogInformation("AI suggested discount-only token counts - Bronze: {Bronze}, Silver: {Silver}, Gold: {Gold}", 
+                    bronzeTokens, silverTokens, goldTokens);
+
+                // STEP 3: Ask AI to suggest products/services for each tier (NOT discount percentages)
+                var productSuggestionPrompt = $@"Business: {businessAttributes.BusinessModel}
+Business Type: {businessAttributes.BusinessType}
+Category: {businessAttributes.CoreProductsOrServices}
+{(similarBusinessData != null ? $"Similar Business Products: {string.Join(", ", similarBusinessData.Products.Select(p => $"{p.Name} (£{p.PriceGBP})"))}" : "")}
+
+TASK: Suggest appropriate products or services that customers would want as rewards for each loyalty tier.
+- DO NOT suggest discount percentages
+- Suggest actual products/services that make sense for this business type
+- Consider typical price ranges for this category
+
+For each tier, suggest:
+- Bronze: Small/affordable item (typically £5-15 value)
+- Silver: Medium item (typically £15-30 value)
+- Gold: Premium item (typically £30-50 value)
+
+Respond in this format:
+BRONZE_PRODUCT: [product/service name] - £[estimated price]
+SILVER_PRODUCT: [product/service name] - £[estimated price]
+GOLD_PRODUCT: [product/service name] - £[estimated price]";
+
+                var productResponse = await GeneratePromptAsync(productSuggestionPrompt);
+                _logger.LogInformation("AI product suggestion response: {Response}", productResponse);
+
+                // Parse product suggestions
+                var bronzeProductMatch = System.Text.RegularExpressions.Regex.Match(productResponse, @"BRONZE_PRODUCT:\s*([^-]+)\s*-\s*£?([\d.]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                var silverProductMatch = System.Text.RegularExpressions.Regex.Match(productResponse, @"SILVER_PRODUCT:\s*([^-]+)\s*-\s*£?([\d.]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                var goldProductMatch = System.Text.RegularExpressions.Regex.Match(productResponse, @"GOLD_PRODUCT:\s*([^-]+)\s*-\s*£?([\d.]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+                decimal? bronzeProductPrice = null, silverProductPrice = null, goldProductPrice = null;
+                string? bronzeProduct = null, silverProduct = null, goldProduct = null;
+
+                if (bronzeProductMatch.Success && decimal.TryParse(bronzeProductMatch.Groups[2].Value, out var bp))
+                {
+                    bronzeProduct = bronzeProductMatch.Groups[1].Value.Trim();
+                    bronzeProductPrice = bp;
+                }
+                if (silverProductMatch.Success && decimal.TryParse(silverProductMatch.Groups[2].Value, out var sp))
+                {
+                    silverProduct = silverProductMatch.Groups[1].Value.Trim();
+                    silverProductPrice = sp;
+                }
+                if (goldProductMatch.Success && decimal.TryParse(goldProductMatch.Groups[2].Value, out var gp))
+                {
+                    goldProduct = goldProductMatch.Groups[1].Value.Trim();
+                    goldProductPrice = gp;
+                }
+
+                // STEP 4: Calculate discount percentages
+                // Priority: Similar business discounts > Calculated from product price > AI-suggested > Default
                 var tiers = new[]
                 {
-                    new { Tier = LoyaltyTier.Bronze, Tokens = 3, Discount = 10m },
-                    new { Tier = LoyaltyTier.Silver, Tokens = 5, Discount = 20m },
-                    new { Tier = LoyaltyTier.Gold, Tokens = 7, Discount = 40m }
+                    new { 
+                        Tier = LoyaltyTier.Bronze, 
+                        Tokens = bronzeTokens, 
+                        Product = bronzeProduct,
+                        ProductPrice = bronzeProductPrice
+                    },
+                    new { 
+                        Tier = LoyaltyTier.Silver, 
+                        Tokens = silverTokens, 
+                        Product = silverProduct,
+                        ProductPrice = silverProductPrice
+                    },
+                    new { 
+                        Tier = LoyaltyTier.Gold, 
+                        Tokens = goldTokens, 
+                        Product = goldProduct,
+                        ProductPrice = goldProductPrice
+                    }
                 };
 
                 foreach (var tier in tiers)
                 {
                     var totalSpendForTier = minimumSpendForToken * tier.Tokens;
+                    decimal discount;
+                    string dataSource;
+                    string reasoning;
+
+                    // Calculate discount based on priority
+                    if (tier.Tier == LoyaltyTier.Bronze && bronzeDiscount.HasValue)
+                    {
+                        discount = bronzeDiscount.Value;
+                        dataSource = discountSource ?? "Similar business";
+                        reasoning = $"Using discount from similar business. Customer has spent £{totalSpendForTier} total.";
+                    }
+                    else if (tier.Tier == LoyaltyTier.Silver && silverDiscount.HasValue)
+                    {
+                        discount = silverDiscount.Value;
+                        dataSource = discountSource ?? "Similar business";
+                        reasoning = $"Using discount from similar business. Customer has spent £{totalSpendForTier} total.";
+                    }
+                    else if (tier.Tier == LoyaltyTier.Gold && goldDiscount.HasValue)
+                    {
+                        discount = goldDiscount.Value;
+                        dataSource = discountSource ?? "Similar business";
+                        reasoning = $"Using discount from similar business. Customer has spent £{totalSpendForTier} total.";
+                    }
+                    else if (tier.ProductPrice.HasValue)
+                    {
+                        // Calculate discount based on product price vs customer spend
+                        // Discount % = (Product Price / Total Customer Spend) * 100
+                        // But ensure it's reasonable (typically 10-50%)
+                        discount = Math.Min(Math.Max((tier.ProductPrice.Value / totalSpendForTier) * 100, 10), 50);
+                        discount = Math.Round(discount, 0); // Round to whole number
+                        dataSource = "AI-suggested (calculated from product price)";
+                        reasoning = $"Calculated discount based on suggested product '{tier.Product}' (£{tier.ProductPrice.Value:F2}) vs customer spend (£{totalSpendForTier}).";
+                    }
+                    else
+                    {
+                        // Fallback to default discounts
+                        discount = tier.Tier == LoyaltyTier.Bronze ? 10m : tier.Tier == LoyaltyTier.Silver ? 20m : 40m;
+                        dataSource = "Default";
+                        reasoning = $"Using default discount. Customer has spent £{totalSpendForTier} total.";
+                    }
 
                     var tierReward = new LoyaltyTierReward
                     {
@@ -1717,11 +2221,14 @@ RECOMMENDED FREE: ProductName - £Z.ZZ";
                         RewardOptions = new List<TierRewardOption>(), // No free items
                         FallbackDiscount = new TierFallbackDiscount
                         {
-                            DiscountPercentage = tier.Discount,
-                            Description = $"Get {tier.Discount}% off your next purchase",
-                            Reasoning = $"Real business found but using discount-only rewards. Customer has spent £{totalSpendForTier} total."
+                            DiscountPercentage = discount,
+                            Description = $"Get {discount}% off your next purchase",
+                            Reasoning = reasoning,
+                            DataSource = dataSource,
+                            SuggestedProduct = tier.Product,
+                            SuggestedProductPrice = tier.ProductPrice
                         },
-                        Reasoning = $"{tier.Tier} tier: {tier.Tokens} tokens for {tier.Discount}% discount (discount-only due to limited business data)"
+                        Reasoning = $"{tier.Tier} tier: {tier.Tokens} tokens for {discount}% discount (discount-only due to limited business data)"
                     };
 
                     analysis.TierRewards.Add(tierReward);

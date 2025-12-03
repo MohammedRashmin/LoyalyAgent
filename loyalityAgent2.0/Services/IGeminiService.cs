@@ -25,6 +25,6 @@ namespace loyalityAgent2._0.Services
         Task<WebSearchResult> SearchBusinessOnWebPlatformsAsync(string businessName, string location);
         Task<BusinessAttributes> ExtractBusinessAttributesFromWebSearchAsync(WebSearchResult webSearchResult, string businessName, string category, string fullAddress);
         Task<ProductAnalysisResult> ExtractProductsFromWebSearchAsync(WebSearchResult webSearchResult, string businessName, string category, string fullAddress);
-        Task<LoyaltyTierAnalysis> GenerateDiscountOnlyTiersAsync(BusinessAttributes businessAttributes, ProductAnalysisResult? productAnalysis, ServiceAnalysisResult? serviceAnalysis, decimal minimumSpendForToken);
+        Task<LoyaltyTierAnalysis> GenerateDiscountOnlyTiersAsync(BusinessAttributes businessAttributes, ProductAnalysisResult? productAnalysis, ServiceAnalysisResult? serviceAnalysis, decimal minimumSpendForToken, CompleteBusinessData? similarBusinessData = null);
     }
 }

@@ -584,6 +584,26 @@
             line-height: 1.5;
         }
 
+        .profit-justification {
+            margin-top: 8px;
+            margin-left: 20px;
+            padding: 10px;
+            background: #f0f7ff;
+            border-left: 3px solid #667eea;
+            border-radius: 4px;
+            font-size: 0.85em;
+            line-height: 1.6;
+        }
+
+        .profit-text {
+            color: #555;
+        }
+
+        .profit-justification strong {
+            color: #667eea;
+            font-weight: 600;
+        }
+
         .workflow-path-display {
             margin-top: 16px;
             padding-top: 16px;
@@ -1295,7 +1315,23 @@
                         freeItems.forEach(item => {
                             const itemName = item.itemName || item.ItemName;
                             const itemValue = item.itemValueGBP || item.ItemValueGBP;
+                            const totalSpend = item.totalCustomerSpend || item.TotalCustomerSpend || 0;
+                            const profit = item.businessProfit || item.BusinessProfit || 0;
+                            const profitMargin = item.profitMarginPercentage || item.ProfitMarginPercentage || 0;
+                            const profitJustification = item.profitJustification || item.ProfitJustification || '';
+                            
                             html += `<li>${escapeHtml(itemName)} (£${itemValue?.toFixed(2) || '0.00'})</li>`;
+                            
+                            // Add profit justification below the item
+                            if (profitJustification || (totalSpend > 0 && profit > 0)) {
+                                html += `<div class="profit-justification">`;
+                                if (profitJustification) {
+                                    html += `<div class="profit-text">${escapeHtml(profitJustification)}</div>`;
+                                } else if (totalSpend > 0) {
+                                    html += `<div class="profit-text">Customer spends £${totalSpend.toFixed(2)} total, gets free ${escapeHtml(itemName)} (£${itemValue?.toFixed(2) || '0.00'}). Business profit: £${profit.toFixed(2)} (${profitMargin.toFixed(1)}% margin).</div>`;
+                                }
+                                html += `</div>`;
+                            }
                         });
                         html += '</ul></div>';
                     }
@@ -1303,12 +1339,28 @@
                     if (fallback) {
                         const discount = fallback.discountPercentage || fallback.DiscountPercentage;
                         const fallbackDesc = fallback.description || fallback.Description || '';
+                        const dataSource = fallback.dataSource || fallback.DataSource || '';
+                        const suggestedProduct = fallback.suggestedProduct || fallback.SuggestedProduct || '';
+                        const suggestedProductPrice = fallback.suggestedProductPrice || fallback.SuggestedProductPrice;
+                        
                         html += '<div class="reward-section">';
                         html += '<div class="reward-label">Alternative</div>';
                         html += `<div class="reward-value">${discount}% off next purchase</div>`;
                         if (fallbackDesc) {
                             html += `<div class="reward-value" style="font-size: 0.85em; color: #666; margin-top: 4px;">${escapeHtml(fallbackDesc)}</div>`;
                         }
+                        
+                        // Show data source if available
+                        if (dataSource) {
+                            html += `<div class="reward-value" style="font-size: 0.8em; color: #4a90e2; margin-top: 6px; font-style: italic;">📊 ${escapeHtml(dataSource)}</div>`;
+                        }
+                        
+                        // Show suggested product if available
+                        if (suggestedProduct) {
+                            const productPriceText = suggestedProductPrice ? ` (£${suggestedProductPrice.toFixed(2)})` : '';
+                            html += `<div class="reward-value" style="font-size: 0.85em; color: #28a745; margin-top: 4px;">💡 Suggested: ${escapeHtml(suggestedProduct)}${productPriceText}</div>`;
+                        }
+                        
                         html += '</div>';
                     }
 

@@ -99,6 +99,12 @@ namespace loyalityAgent2._0.Models
         public decimal ItemValueGBP { get; set; }
         public bool CanBeGivenFree { get; set; }
         public string ReasoningForSelection { get; set; } = string.Empty;
+        
+        // Profit calculation fields
+        public decimal TotalCustomerSpend { get; set; } // Tokens × Minimum Spend Per Token
+        public decimal BusinessProfit { get; set; } // Total Spend - Product Price
+        public decimal ProfitMarginPercentage { get; set; } // (Profit / Total Spend) × 100
+        public string ProfitJustification { get; set; } = string.Empty; // Human-readable explanation
     }
 
     public class TierFallbackDiscount
@@ -106,6 +112,9 @@ namespace loyalityAgent2._0.Models
         public decimal DiscountPercentage { get; set; }
         public string Description { get; set; } = string.Empty;
         public string Reasoning { get; set; } = string.Empty;
+        public string? DataSource { get; set; } // e.g., "Similar business in your area", "AI-suggested", "Default"
+        public string? SuggestedProduct { get; set; } // Product/service suggested by AI for this discount
+        public decimal? SuggestedProductPrice { get; set; } // Price of suggested product
     }
 
     public class LoyaltyTierAnalysis

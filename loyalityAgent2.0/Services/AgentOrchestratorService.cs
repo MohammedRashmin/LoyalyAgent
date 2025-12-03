@@ -47,6 +47,7 @@ namespace loyalityAgent2._0.Services
 
                 PlaceDetails? placeDetails = null;
                 Business? similarBusiness = null;
+                CompleteBusinessData? similarBusinessData = null; // Store similar business data for discount tiers
                 BusinessAttributes businessAttributes;
                 ProductAnalysisResult productAnalysis;
                 ServiceAnalysisResult? serviceAnalysis = null;
@@ -172,7 +173,7 @@ namespace loyalityAgent2._0.Services
                             await BroadcastProgressAsync(connectionId, "SIMILAR_FOUND", $"Found similar business: {similarBusiness.BusinessName}");
 
                             // Get complete similar business data
-                            var similarBusinessData = await _similarBusinessService.GetCompleteBusinessDataAsync(similarBusiness.BusinessId);
+                            similarBusinessData = await _similarBusinessService.GetCompleteBusinessDataAsync(similarBusiness.BusinessId);
 
                             // Extract basic attributes
                             businessAttributes = new BusinessAttributes
@@ -193,7 +194,18 @@ namespace loyalityAgent2._0.Services
                         }
                         else
                         {
-                            // No similar business in database - use Fallback Discount
+                            // No similar business in database - but check again for discount purposes
+                            // Try to find similar business just for discount reference (even if not exact match)
+                            await BroadcastProgressAsync(connectionId, "CHECK_SIMILAR_DISCOUNT", "Checking for similar businesses to reference discount rates...");
+                            var similarForDiscount = await _similarBusinessService.FindSimilarBusinessAsync(category, fullAddress);
+                            
+                            if (similarForDiscount != null)
+                            {
+                                similarBusinessData = await _similarBusinessService.GetCompleteBusinessDataAsync(similarForDiscount.BusinessId);
+                                _logger.LogInformation("Found similar business for discount reference: {Name}", similarForDiscount.BusinessName);
+                            }
+                            
+                            // Use Fallback Discount
                             _logger.LogInformation("No similar business found, using fallback discount (real business found)");
                             dataSource = "Web Search → Fallback Discount";
                             isRealData = true;
@@ -248,8 +260,9 @@ namespace loyalityAgent2._0.Services
                 // Use discount-only tiers if we're in fallback discount mode
                 if (dataSource == "Web Search → Fallback Discount")
                 {
+                    // Pass similar business data if available (for discount reference)
                     tierAnalysis = await _geminiService.GenerateDiscountOnlyTiersAsync(
-                        businessAttributes, productAnalysis, serviceAnalysis, minimumSpent);
+                        businessAttributes, productAnalysis, serviceAnalysis, minimumSpent, similarBusinessData);
                 }
                 else
                 {
