@@ -5,7 +5,7 @@ namespace loyalityAgent2._0.Services
     public interface IGeminiService
     {
         void SetApiKey(string apiKey);
-        Task<BusinessAttributes> ExtractBusinessAttributesAsync(string businessName, string category, string fullAddress);
+        Task<BusinessAttributes> ExtractBusinessAttributesAsync(string businessName, string category, string fullAddress, PlaceDetails? placeDetails = null);
         Task<ProductAnalysisResult> AnalyzeProductsAsync(BusinessAttributes businessAttributes, decimal minimumSpent);
         Task<ServiceAnalysisResult> AnalyzeServicesAsync(BusinessAttributes businessAttributes, decimal minimumSpent);
         Task<ReasoningResult> ReasonProductOfferAsync(BusinessAttributes businessAttributes, string product, decimal productPrice, decimal minimumSpent);

@@ -25,15 +25,35 @@ namespace loyalityAgent2._0.Services
             _logger.LogInformation("API key set for user request");
         }
 
-        public async Task<BusinessAttributes> ExtractBusinessAttributesAsync(string businessName, string category, string fullAddress)
+        public async Task<BusinessAttributes> ExtractBusinessAttributesAsync(string businessName, string category, string fullAddress, PlaceDetails? placeDetails = null)
         {
             try
             {
                 _logger.LogInformation("Extracting business attributes for: {BusinessName}", businessName);
 
+                // Build prompt with Geoapify data if available (for faster, more accurate search)
+                var geoapifyContext = "";
+                if (placeDetails != null)
+                {
+                    var categoriesList = placeDetails.Categories != null && placeDetails.Categories.Any() 
+                        ? string.Join(", ", placeDetails.Categories) 
+                        : category;
+                    
+                    geoapifyContext = $@"
+CONFIRMED BUSINESS DATA (from Geoapify):
+- Website: {placeDetails.Website ?? "Not available"}
+- Phone: {placeDetails.PhoneNumber ?? "Not available"}
+- Categories: {categoriesList}
+- Location: {placeDetails.FormattedAddress ?? fullAddress}
+- Coordinates: {placeDetails.Latitude}, {placeDetails.Longitude}
+
+{(string.IsNullOrEmpty(placeDetails.Website) ? "" : $"IMPORTANT: Search this specific website first: {placeDetails.Website}")}
+";
+                }
+
                 // Single search query with Google Search grounding
                 var searchPrompt = $@"Search the web for information about: {businessName} {category} {fullAddress}
-
+{geoapifyContext}
 Tell me about this business:
 - What is their business model?
 - What products or services do they sell/offer?
@@ -43,7 +63,7 @@ Tell me about this business:
 - What makes them special or unique?
 - Do they primarily sell PRODUCTS, provide SERVICES, or both (HYBRID)?
 
-Give me real, specific information about this business based on web search.";
+{(string.IsNullOrEmpty(geoapifyContext) ? "Give me real, specific information about this business based on web search." : "Use the confirmed website and data above to get accurate information. Give me real, specific information about this business.")}";
 
                 var response = await PerformGoogleSearchWithPromptAsync(searchPrompt);
 
@@ -985,14 +1005,31 @@ FALLBACK: If items cannot be given free, suggest {tier.FallbackDiscount}% discou
             {
                 _logger.LogInformation("Extracting menu with Geoapify data for: {BusinessName}", businessName);
 
-                // STEP 1: Fast Path - Google Search (5-8s)
+                // STEP 1: Fast Path - Google Search (5-8s) - Using Geoapify data for targeted search
+                var geoapifyInfo = "";
+                if (placeDetails != null)
+                {
+                    var categoriesList = placeDetails.Categories != null && placeDetails.Categories.Any() 
+                        ? string.Join(", ", placeDetails.Categories) 
+                        : category;
+                    
+                    geoapifyInfo = $@"
+CONFIRMED BUSINESS DATA (from Geoapify):
+- Website: {placeDetails.Website ?? "Not available"}
+- Phone: {placeDetails.PhoneNumber ?? "Not available"}
+- Categories: {categoriesList}
+- Location: {placeDetails.FormattedAddress ?? address}
+
+{(string.IsNullOrEmpty(placeDetails.Website) ? "" : $"IMPORTANT: Search this specific website first: {placeDetails.Website}")}
+";
+                }
+                
                 var prompt = $@"Business: {businessName}
 Category: {category}
 Address: {address}
-{(placeDetails != null ? $"Website: {placeDetails.Website ?? "Not available"}\nPhone: {placeDetails.PhoneNumber ?? "Not available"}" : "")}
-
+{geoapifyInfo}
 TASK: Search Google for menu items and prices for this business.
-- Search web for actual menu items
+{(string.IsNullOrEmpty(placeDetails?.Website) ? "- Search web for actual menu items" : $"- Search this specific website: {placeDetails.Website}")}
 - Get real prices in GBP (£)
 - List ALL products with prices
 - Focus on items suitable for welcome gifts (small, affordable)
@@ -1016,13 +1053,30 @@ RECOMMENDED FREE: ProductName - £Z.ZZ";
                 _logger.LogInformation("Insufficient menu items ({Count}), searching Uber/TripAdvisor/Google...", 
                     productAnalysis.AllProducts.Count);
 
-                var enhancedPrompt = $@"Business: {businessName}
-Website: {placeDetails?.Website ?? "Not available"}
-Address: {address}
-Category: {category}
+                var enhancedGeoapifyInfo = "";
+                if (placeDetails != null)
+                {
+                    var categoriesList = placeDetails.Categories != null && placeDetails.Categories.Any() 
+                        ? string.Join(", ", placeDetails.Categories) 
+                        : category;
+                    
+                    enhancedGeoapifyInfo = $@"
+CONFIRMED BUSINESS DATA (from Geoapify):
+- Website: {placeDetails.Website ?? "Not available"}
+- Phone: {placeDetails.PhoneNumber ?? "Not available"}
+- Categories: {categoriesList}
+- Location: {placeDetails.FormattedAddress ?? address}
 
+{(string.IsNullOrEmpty(placeDetails.Website) ? "" : $"IMPORTANT: Start with this website: {placeDetails.Website}")}
+";
+                }
+                
+                var enhancedPrompt = $@"Business: {businessName}
+Category: {category}
+Address: {address}
+{enhancedGeoapifyInfo}
 TASK: Search Google, Uber Eats, and TripAdvisor for menu items.
-- Search Google Business/Google Maps
+{(string.IsNullOrEmpty(placeDetails?.Website) ? "- Search Google Business/Google Maps" : $"- First search this website: {placeDetails.Website}")}
 - Search Uber Eats (if food business)
 - Search TripAdvisor restaurant page
 - Extract ALL products with prices in GBP (£)

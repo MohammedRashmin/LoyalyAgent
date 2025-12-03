@@ -71,8 +71,8 @@ namespace loyalityAgent2._0.Services
 
                     await BroadcastProgressAsync(connectionId, "GEOAPIFY_FOUND", $"Found business: {placeDetails.Name}");
 
-                    // Extract business attributes
-                    businessAttributes = await _geminiService.ExtractBusinessAttributesAsync(businessName, category, fullAddress);
+                    // Extract business attributes (pass Geoapify data for faster, more accurate search)
+                    businessAttributes = await _geminiService.ExtractBusinessAttributesAsync(businessName, category, fullAddress, placeDetails);
 
                     // STEP 2: Try to find website if not provided by Geoapify
                     string? websiteUrl = placeDetails.Website;
