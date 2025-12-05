@@ -26,5 +26,32 @@ namespace loyalityAgent2._0.Services
         Task<BusinessAttributes> ExtractBusinessAttributesFromWebSearchAsync(WebSearchResult webSearchResult, string businessName, string category, string fullAddress);
         Task<ProductAnalysisResult> ExtractProductsFromWebSearchAsync(WebSearchResult webSearchResult, string businessName, string category, string fullAddress);
         Task<LoyaltyTierAnalysis> GenerateDiscountOnlyTiersAsync(BusinessAttributes businessAttributes, ProductAnalysisResult? productAnalysis, ServiceAnalysisResult? serviceAnalysis, decimal minimumSpendForToken, CompleteBusinessData? similarBusinessData = null);
+        
+        // Combined methods to reduce API calls to 3 total
+        Task<(BusinessAttributes BusinessAttributes, ProductAnalysisResult ProductAnalysis)> ExtractBusinessAttributesAndMenuCombinedAsync(
+            PlaceDetails? placeDetails, 
+            string businessName, 
+            string category, 
+            string fullAddress);
+        
+        // Combined method for web search path (reduces 4 POST calls to 1 POST)
+        Task<(WebSearchResult WebSearchResult, BusinessAttributes BusinessAttributes, ProductAnalysisResult ProductAnalysis, ServiceAnalysisResult? ServiceAnalysis)> SearchBusinessAndExtractAllCombinedAsync(
+            string businessName, 
+            string category, 
+            string fullAddress, 
+            decimal minimumSpent);
+        
+        Task<(WelcomeGiftResponse WelcomeGift, LoyaltyTierAnalysis TierAnalysis)> GenerateWelcomeGiftAndTiersCombinedAsync(
+            ProductAnalysisResult productAnalysis, 
+            ServiceAnalysisResult? serviceAnalysis, 
+            BusinessAttributes businessAttributes, 
+            decimal minimumSpent);
+        
+        Task<(WelcomeGiftResponse WelcomeGift, LoyaltyTierAnalysis TierAnalysis)> GenerateWelcomeGiftAndDiscountTiersCombinedAsync(
+            ProductAnalysisResult productAnalysis, 
+            ServiceAnalysisResult? serviceAnalysis, 
+            BusinessAttributes businessAttributes, 
+            decimal minimumSpent, 
+            CompleteBusinessData? similarBusinessData = null);
     }
 }

@@ -2077,6 +2077,146 @@ RECOMMENDED FREE: ProductName - £Z.ZZ";
             }
         }
 
+        // Combined method: Web Search + Business Attributes + Products + Services in ONE POST call
+        public async Task<(WebSearchResult WebSearchResult, BusinessAttributes BusinessAttributes, ProductAnalysisResult ProductAnalysis, ServiceAnalysisResult? ServiceAnalysis)> SearchBusinessAndExtractAllCombinedAsync(
+            string businessName, 
+            string category, 
+            string fullAddress, 
+            decimal minimumSpent)
+        {
+            try
+            {
+                _logger.LogInformation("Searching web platforms and extracting all data combined (1 API call) for: {BusinessName}", businessName);
+
+                // Combined prompt for all operations
+                var combinedPrompt = $@"Search Google, Uber Eats, and TripAdvisor for: ""{businessName}"" in ""{fullAddress}""
+
+TASK 1: WEB SEARCH
+Find information about this business:
+- Business name, address, website, phone number
+- Menu items and prices (if restaurant/food business)
+- Services offered (if service business)
+- Reviews/ratings if available
+
+Sources to check:
+1. Google Business/Google Maps
+2. Uber Eats (if food business)
+3. TripAdvisor
+
+TASK 2: BUSINESS ATTRIBUTES
+From the search results, determine:
+- Business model (B2B, B2C, etc.)
+- Core products or services
+- Target audience
+- Business tone/style (casual, luxury, professional, etc.)
+- Popularity/size (local shop, regional chain, national/international brand)
+- Specialization keywords
+- Business type (Product, Service, or Hybrid)
+
+TASK 3: PRODUCTS/SERVICES
+Extract products/services and prices from the search results:
+- Extract ALL products/services with prices in GBP (£)
+- Get real prices from the search results
+- List ALL products/services with prices
+- Extract items from ALL categories/sections (whatever this business offers - food items, retail products, services, packages, treatments, classes, memberships, etc.)
+
+CURRENCY CONVERSION (convert all prices to GBP £):
+- GBP (British Pounds): Already in GBP - use as-is (e.g., £10.00 = £10.00)
+- LKR (Sri Lankan Rupees): 1 GBP ≈ 400 LKR (e.g., Rs. 800 = £2.00)
+- USD: 1 GBP ≈ 1.25 USD (e.g., $10 = £8.00)
+- EUR: 1 GBP ≈ 1.15 EUR (e.g., €10 = £8.70)
+- If no currency symbol, assume GBP if UK business, LKR if Sri Lankan
+
+TASK 4: SERVICES ANALYSIS (if Service or Hybrid business)
+If the business provides SERVICES or is HYBRID, analyze:
+- What services do they offer?
+- Typical service prices in GBP (£)
+- Which services are suitable for welcome offers (discounts for first-time customers)
+- Minimum service price for welcome offer
+
+RESPOND IN THIS EXACT FORMAT:
+WEB_SEARCH:
+FOUND: YES or NO
+SOURCE: Google/Uber/TripAdvisor/Multiple
+BUSINESS_NAME: [name if found]
+ADDRESS: [address if found]
+WEBSITE: [website if found]
+PHONE: [phone if found]
+MENU_ITEMS: [list of menu items if found]
+RAW_DATA: [full search results]
+
+BUSINESS_ATTRIBUTES:
+Business Model: [model]
+Core Products/Services: [products/services]
+Target Audience: [audience]
+Business Tone/Style: [tone/style]
+Popularity/Size: [size]
+Specialization Keywords: [keywords]
+Business Type: PRODUCT/SERVICE/HYBRID
+
+MENU_ITEMS:
+PRODUCTS: Product1 - £X.XX, Product2 - £Y.YY, Product3 - £Z.ZZ, [continue listing ALL items]
+POPULAR: [list popular items if mentioned]
+RECOMMENDED_FREE: ProductName - £Z.ZZ (smallest/cheapest item, typically under £5)
+
+SERVICES: (only if Business Type is SERVICE or HYBRID)
+SERVICES: Service1 - £X.XX, Service2 - £Y.YY, Service3 - £Z.ZZ
+POPULAR: [list popular services]
+ENTRY-LEVEL SERVICES: Service A - £X.XX, Service B - £Y.YY
+RECOMMENDED DISCOUNT: ServiceName - £Z.ZZ";
+
+                var response = await PerformGoogleSearchWithPromptAsync(combinedPrompt);
+                
+                // Parse Web Search Result
+                var webSearchResult = ParseWebSearchResult(response, businessName, fullAddress);
+                
+                // Parse Business Attributes
+                var businessAttributes = ParseBusinessAttributesFromText(response);
+                
+                // Parse Products
+                var productAnalysis = ParseProductAnalysisWithPricesFromText(response, 0);
+                
+                // Parse Services (if service/hybrid)
+                ServiceAnalysisResult? serviceAnalysis = null;
+                if (businessAttributes.BusinessType == BusinessType.Service || businessAttributes.BusinessType == BusinessType.Hybrid)
+                {
+                    serviceAnalysis = ParseServiceAnalysisWithPricesFromText(response, minimumSpent);
+                }
+                
+                _logger.LogInformation("Combined web search extraction complete - Found: {Found}, Attributes: {Model}, Products: {Count}, Services: {HasServices}", 
+                    webSearchResult.Found, businessAttributes.BusinessModel, productAnalysis.AllProducts.Count, serviceAnalysis != null);
+
+                return (webSearchResult, businessAttributes, productAnalysis, serviceAnalysis);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in combined web search and extraction");
+                // Fallback to separate calls
+                var webSearchResult = await SearchBusinessOnWebPlatformsAsync(businessName, fullAddress);
+                BusinessAttributes businessAttributes;
+                ProductAnalysisResult productAnalysis;
+                ServiceAnalysisResult? serviceAnalysis = null;
+                
+                if (webSearchResult.Found)
+                {
+                    businessAttributes = await ExtractBusinessAttributesFromWebSearchAsync(webSearchResult, businessName, category, fullAddress);
+                    productAnalysis = await ExtractProductsFromWebSearchAsync(webSearchResult, businessName, category, fullAddress);
+                    if (businessAttributes.BusinessType == BusinessType.Service || businessAttributes.BusinessType == BusinessType.Hybrid)
+                    {
+                        serviceAnalysis = await AnalyzeServicesAsync(businessAttributes, minimumSpent);
+                    }
+                }
+                else
+                {
+                    businessAttributes = await ExtractBusinessAttributesAsync(businessName, category, fullAddress);
+                    productAnalysis = await GenerateCategoryBasedProductsAsync(businessName, category, fullAddress, minimumSpent);
+                }
+                
+                return (webSearchResult, businessAttributes, productAnalysis, serviceAnalysis);
+            }
+        }
+
+
         public async Task<LoyaltyTierAnalysis> GenerateDiscountOnlyTiersAsync(BusinessAttributes businessAttributes, ProductAnalysisResult? productAnalysis, ServiceAnalysisResult? serviceAnalysis, decimal minimumSpendForToken, CompleteBusinessData? similarBusinessData = null)
         {
             try
@@ -2296,6 +2436,561 @@ GOLD_PRODUCT: [product/service name] - £[estimated price]";
                 _logger.LogError(ex, "Error generating discount-only tiers");
                 return CreateFallbackTierAnalysis(minimumSpendForToken);
             }
+        }
+
+        // Combined method: Welcome Gift + Discount-Only Tiers in ONE POST call
+        public async Task<(WelcomeGiftResponse WelcomeGift, LoyaltyTierAnalysis TierAnalysis)> GenerateWelcomeGiftAndDiscountTiersCombinedAsync(
+            ProductAnalysisResult productAnalysis, 
+            ServiceAnalysisResult? serviceAnalysis, 
+            BusinessAttributes businessAttributes, 
+            decimal minimumSpent, 
+            CompleteBusinessData? similarBusinessData = null)
+        {
+            try
+            {
+                _logger.LogInformation("Generating welcome gift and discount-only tiers combined (1 API call)");
+
+                var products = string.Join(", ", productAnalysis.AllProducts.Select(p => $"{p.Name} (£{p.PriceGBP})"));
+                
+                // Extract discount percentages from similar business (if available)
+                decimal? bronzeDiscount = null, silverDiscount = null, goldDiscount = null;
+                string? discountSource = null;
+                
+                if (similarBusinessData != null)
+                {
+                    _logger.LogInformation("Found similar business: {Name}, extracting discount percentages", similarBusinessData.Business.BusinessName);
+                    
+                    var similarBronze = similarBusinessData.TierRewards.FirstOrDefault(t => t.Tier == LoyaltyTier.Bronze);
+                    var similarSilver = similarBusinessData.TierRewards.FirstOrDefault(t => t.Tier == LoyaltyTier.Silver);
+                    var similarGold = similarBusinessData.TierRewards.FirstOrDefault(t => t.Tier == LoyaltyTier.Gold);
+                    
+                    if (similarBronze?.FallbackDiscountPercentage.HasValue == true)
+                        bronzeDiscount = similarBronze.FallbackDiscountPercentage.Value;
+                    if (similarSilver?.FallbackDiscountPercentage.HasValue == true)
+                        silverDiscount = similarSilver.FallbackDiscountPercentage.Value;
+                    if (similarGold?.FallbackDiscountPercentage.HasValue == true)
+                        goldDiscount = similarGold.FallbackDiscountPercentage.Value;
+                    
+                    if (bronzeDiscount.HasValue || silverDiscount.HasValue || goldDiscount.HasValue)
+                        discountSource = $"Based on similar {similarBusinessData.Business.Category} in your area";
+                }
+
+                // Combined prompt for Welcome Gift + Token Counts + Product Suggestions
+                var combinedPrompt = $@"Business: {businessAttributes.BusinessModel}
+Business Type: {businessAttributes.BusinessType}
+Core Offerings: {businessAttributes.CoreProductsOrServices}
+Available Products: {products}
+Customer earns 1 token per £{minimumSpent} spent
+{(similarBusinessData != null ? $"Similar Business Products: {string.Join(", ", similarBusinessData.Products.Select(p => $"{p.Name} (£{p.PriceGBP})"))}" : "")}
+
+TASK 1: WELCOME GIFT
+CRITICAL CONSTRAINT: Welcome gift price MUST be ≤ £{minimumSpent} (the minimum spend per token).
+- This is a truly FREE gift (no purchase required)
+- Business cannot afford to give away items worth more than what a customer typically spends in one visit
+- If minimum spend is £{minimumSpent}, welcome gift should be ≤ £{minimumSpent} (ideally much less, like £3-5)
+
+Select the BEST welcome gift (truly free, no purchase required):
+- MUST be ≤ £{minimumSpent} (this is REQUIRED, not optional)
+- Ideally should be small/affordable (typically £3-5 or less)
+- Must be from the available products
+- Should create good first impression
+- If no products are ≤ £{minimumSpent}, select the cheapest available product
+
+TASK 2: TOKEN COUNTS FOR DISCOUNT-ONLY TIERS
+Suggest appropriate token counts for a discount-only loyalty program (all tokens must be ≤ 10):
+- Bronze: Should be accessible (typically 2-4 tokens) - for occasional customers
+- Silver: Should be moderate (typically 4-7 tokens) - for regular customers  
+- Gold: Should be premium (typically 7-10 tokens) - for loyal customers
+
+TASK 3: PRODUCT SUGGESTIONS FOR TIERS
+Suggest appropriate products or services that customers would want as rewards for each loyalty tier.
+- DO NOT suggest discount percentages
+- Suggest actual products/services that make sense for this business type
+- Consider typical price ranges for this category
+- Bronze: Small/affordable item (typically £5-15 value)
+- Silver: Medium item (typically £15-30 value)
+- Gold: Premium item (typically £30-50 value)
+
+RESPOND IN THIS EXACT FORMAT:
+WELCOME_GIFT:
+SELECTED: ProductName - £X.XX (MUST be ≤ £{minimumSpent})
+REASONING: [explain why, including why the price is affordable for the business]
+
+TOKEN_COUNTS:
+BRONZE_TOKENS: [number 1-10]
+SILVER_TOKENS: [number 1-10, must be > Bronze]
+GOLD_TOKENS: [number 1-10, must be > Silver]
+
+TIER_PRODUCTS:
+BRONZE_PRODUCT: [product/service name] - £[estimated price]
+SILVER_PRODUCT: [product/service name] - £[estimated price]
+GOLD_PRODUCT: [product/service name] - £[estimated price]";
+
+                var response = await GeneratePromptAsync(combinedPrompt);
+                _logger.LogInformation("Combined response (first 1000 chars): {Response}", 
+                    response.Substring(0, Math.Min(1000, response.Length)));
+
+                // Parse Welcome Gift
+                var welcomeGift = ParseWelcomeGiftFromResponse(response, productAnalysis, minimumSpent);
+
+                // Parse Token Counts
+                var (bronzeTokens, silverTokens, goldTokens) = ParseTokenCountsFromResponse(response);
+                bronzeTokens = Math.Min(Math.Max(bronzeTokens, 2), 10);
+                silverTokens = Math.Min(Math.Max(silverTokens, bronzeTokens + 1), 10);
+                goldTokens = Math.Min(Math.Max(goldTokens, silverTokens + 1), 10);
+
+                // Parse Product Suggestions
+                var bronzeProductMatch = Regex.Match(response, @"BRONZE_PRODUCT:\s*([^-]+)\s*-\s*£?([\d.]+)", RegexOptions.IgnoreCase);
+                var silverProductMatch = Regex.Match(response, @"SILVER_PRODUCT:\s*([^-]+)\s*-\s*£?([\d.]+)", RegexOptions.IgnoreCase);
+                var goldProductMatch = Regex.Match(response, @"GOLD_PRODUCT:\s*([^-]+)\s*-\s*£?([\d.]+)", RegexOptions.IgnoreCase);
+
+                decimal? bronzeProductPrice = null, silverProductPrice = null, goldProductPrice = null;
+                string? bronzeProduct = null, silverProduct = null, goldProduct = null;
+
+                if (bronzeProductMatch.Success && decimal.TryParse(bronzeProductMatch.Groups[2].Value, out var bp))
+                {
+                    bronzeProduct = bronzeProductMatch.Groups[1].Value.Trim();
+                    bronzeProductPrice = bp;
+                }
+                if (silverProductMatch.Success && decimal.TryParse(silverProductMatch.Groups[2].Value, out var sp))
+                {
+                    silverProduct = silverProductMatch.Groups[1].Value.Trim();
+                    silverProductPrice = sp;
+                }
+                if (goldProductMatch.Success && decimal.TryParse(goldProductMatch.Groups[2].Value, out var gp))
+                {
+                    goldProduct = goldProductMatch.Groups[1].Value.Trim();
+                    goldProductPrice = gp;
+                }
+
+                // Build Tier Analysis
+                var tierAnalysis = new LoyaltyTierAnalysis
+                {
+                    MinimumSpendForToken = minimumSpent,
+                    TierRewards = new List<LoyaltyTierReward>(),
+                    HasFreeItemOptions = false,
+                    OverallStrategy = "Token-based loyalty program with tier-based discount rewards"
+                };
+
+                // Calculate discount percentages and create tiers
+                var tiers = new[]
+                {
+                    new { Tier = LoyaltyTier.Bronze, Tokens = bronzeTokens, Product = bronzeProduct, ProductPrice = bronzeProductPrice, Discount = bronzeDiscount },
+                    new { Tier = LoyaltyTier.Silver, Tokens = silverTokens, Product = silverProduct, ProductPrice = silverProductPrice, Discount = silverDiscount },
+                    new { Tier = LoyaltyTier.Gold, Tokens = goldTokens, Product = goldProduct, ProductPrice = goldProductPrice, Discount = goldDiscount }
+                };
+
+                foreach (var tier in tiers)
+                {
+                    decimal discountPercentage;
+                    string discountReasoning;
+
+                    if (tier.Discount.HasValue)
+                    {
+                        discountPercentage = tier.Discount.Value;
+                        discountReasoning = discountSource ?? "Based on similar business in area";
+                    }
+                    else if (tier.ProductPrice.HasValue)
+                    {
+                        // Calculate discount: ensure 75% profit margin
+                        var totalSpend = tier.Tokens * minimumSpent;
+                        var profit = totalSpend - tier.ProductPrice.Value;
+                        discountPercentage = Math.Min(Math.Max((profit / totalSpend) * 100, 10), 50);
+                        discountReasoning = $"Calculated from {tier.Product} (£{tier.ProductPrice.Value}) to ensure 75%+ profit margin";
+                    }
+                    else
+                    {
+                        // Default discounts
+                        discountPercentage = tier.Tier == LoyaltyTier.Bronze ? 10m : tier.Tier == LoyaltyTier.Silver ? 20m : 40m;
+                        discountReasoning = "Default discount for tier";
+                    }
+
+                    tierAnalysis.TierRewards.Add(new LoyaltyTierReward
+                    {
+                        Tier = tier.Tier,
+                        RequiredTokens = tier.Tokens,
+                        RewardOptions = new List<TierRewardOption>(),
+                        FallbackDiscount = new TierFallbackDiscount
+                        {
+                            DiscountPercentage = discountPercentage,
+                            Description = $"Get {discountPercentage}% off your next purchase",
+                            Reasoning = discountReasoning
+                        },
+                        Reasoning = $"{tier.Tier} tier: {tier.Tokens} tokens for {discountPercentage}% discount"
+                    });
+                }
+
+                _logger.LogInformation("Combined generation complete - Welcome Gift: {Gift}, Tiers: {TierCount}", 
+                    welcomeGift.ItemName, tierAnalysis.TierRewards.Count);
+
+                return (welcomeGift, tierAnalysis);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error generating combined welcome gift and tiers");
+                // Fallback
+                var fallbackGift = new WelcomeGiftResponse
+                {
+                    ItemName = "Welcome Gift",
+                    ItemPriceGBP = Math.Min(5m, minimumSpent),
+                    Description = "Welcome gift",
+                    IsFree = true
+                };
+                return (fallbackGift, CreateFallbackTierAnalysis(minimumSpent));
+            }
+        }
+
+        private WelcomeGiftResponse ParseWelcomeGiftFromResponse(string response, ProductAnalysisResult productAnalysis, decimal minimumSpent)
+        {
+            var selectedMatch = Regex.Match(response, @"SELECTED:\s*([^-]+)\s*-\s*£?([\d.]+)", RegexOptions.IgnoreCase);
+            var reasoningMatch = Regex.Match(response, @"REASONING:\s*(.+?)(?:\n|TOKEN_COUNTS:|$)", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+            if (selectedMatch.Success && decimal.TryParse(selectedMatch.Groups[2].Value, out var price))
+            {
+                if (price <= minimumSpent)
+                {
+                    return new WelcomeGiftResponse
+                    {
+                        ItemName = selectedMatch.Groups[1].Value.Trim(),
+                        ItemPriceGBP = price,
+                        Description = $"Welcome! Get one {selectedMatch.Groups[1].Value.Trim()} absolutely FREE - no purchase required!",
+                        Reasoning = reasoningMatch.Success ? reasoningMatch.Groups[1].Value.Trim() : "Selected as best welcome gift",
+                        IsFree = true
+                    };
+                }
+            }
+
+            // Fallback: Find affordable product
+            var affordableProduct = productAnalysis.AllProducts
+                .Where(p => p.PriceGBP <= minimumSpent)
+                .OrderBy(p => p.PriceGBP)
+                .FirstOrDefault() 
+                ?? productAnalysis.AllProducts.OrderBy(p => p.PriceGBP).FirstOrDefault();
+
+            if (affordableProduct != null)
+            {
+                return new WelcomeGiftResponse
+                {
+                    ItemName = affordableProduct.Name,
+                    ItemPriceGBP = affordableProduct.PriceGBP,
+                    Description = $"Welcome! Get one {affordableProduct.Name} absolutely FREE - no purchase required!",
+                    Reasoning = "Selected as most affordable welcome gift",
+                    IsFree = true
+                };
+            }
+
+            return new WelcomeGiftResponse
+            {
+                ItemName = "Welcome Gift",
+                ItemPriceGBP = Math.Min(5m, minimumSpent),
+                Description = "Welcome gift",
+                IsFree = true
+            };
+        }
+
+        // Combined method: Business Attributes + Menu Extraction in ONE POST call
+        public async Task<(BusinessAttributes BusinessAttributes, ProductAnalysisResult ProductAnalysis)> ExtractBusinessAttributesAndMenuCombinedAsync(
+            PlaceDetails? placeDetails, 
+            string businessName, 
+            string category, 
+            string fullAddress)
+        {
+            try
+            {
+                _logger.LogInformation("Extracting business attributes and menu combined (1 API call) for: {BusinessName}", businessName);
+
+                // Build Geoapify context
+                var geoapifyContext = "";
+                if (placeDetails != null)
+                {
+                    var categoriesList = placeDetails.Categories != null && placeDetails.Categories.Any() 
+                        ? string.Join(", ", placeDetails.Categories) 
+                        : category;
+                    
+                    geoapifyContext = $@"
+CONFIRMED BUSINESS DATA (from Geoapify):
+- Website: {placeDetails.Website ?? "Not available"}
+- Phone: {placeDetails.PhoneNumber ?? "Not available"}
+- Categories: {categoriesList}
+- Location: {placeDetails.FormattedAddress ?? fullAddress}
+- Coordinates: {placeDetails.Latitude}, {placeDetails.Longitude}
+
+{(string.IsNullOrEmpty(placeDetails.Website) ? "" : $"IMPORTANT: Search this specific website first: {placeDetails.Website}")}
+";
+                }
+
+                // Combined prompt for both business attributes and menu
+                var combinedPrompt = $@"Search the web for information about: {businessName} {category} {fullAddress}
+{geoapifyContext}
+
+TASK 1: BUSINESS ATTRIBUTES
+Tell me about this business:
+- What is their business model?
+- What products or services do they sell/offer?
+- Who are their target customers?
+- What is their brand style (casual, luxury, professional, etc.)?
+- How big/popular are they (local shop, regional chain, national/international brand)?
+- What makes them special or unique?
+- Do they primarily sell PRODUCTS, provide SERVICES, or both (HYBRID)?
+
+TASK 2: MENU ITEMS
+Search for the COMPLETE menu of this business:
+{(string.IsNullOrEmpty(placeDetails?.Website) ? "- Search web for actual menu items" : $"- Search this specific website: {placeDetails.Website}")}
+- Get real prices in GBP (£)
+- List ALL products/services with prices
+- Focus on items suitable for welcome gifts (small, affordable)
+- Extract items from ALL categories/sections (whatever this business offers - food items, retail products, services, packages, treatments, classes, memberships, etc.)
+
+CURRENCY CONVERSION (convert all prices to GBP £):
+- GBP (British Pounds): Already in GBP - use as-is (e.g., £10.00 = £10.00)
+- LKR (Sri Lankan Rupees): 1 GBP ≈ 400 LKR (e.g., Rs. 800 = £2.00)
+- USD: 1 GBP ≈ 1.25 USD (e.g., $10 = £8.00)
+- EUR: 1 GBP ≈ 1.15 EUR (e.g., €10 = £8.70)
+- If no currency symbol, assume GBP if UK business, LKR if Sri Lankan
+
+RESPOND IN THIS FORMAT:
+BUSINESS_ATTRIBUTES:
+Business Model: [model]
+Core Products/Services: [products/services]
+Target Audience: [audience]
+Business Tone/Style: [tone/style]
+Popularity/Size: [size]
+Specialization Keywords: [keywords]
+Business Type: PRODUCT/SERVICE/HYBRID
+
+MENU_ITEMS:
+PRODUCTS: Product1 - £X.XX, Product2 - £Y.YY, Product3 - £Z.ZZ, [continue listing ALL items]
+POPULAR: [list popular items if mentioned]
+RECOMMENDED_FREE: ProductName - £Z.ZZ (smallest/cheapest item, typically under £5)";
+
+                var response = await PerformGoogleSearchWithPromptAsync(combinedPrompt);
+                
+                // Parse business attributes
+                var businessAttributes = ParseBusinessAttributesFromText(response);
+                
+                // Parse menu items
+                var productAnalysis = ParseProductAnalysisWithPricesFromText(response, 0);
+                
+                _logger.LogInformation("Combined extraction complete - Attributes: {Model}, Products: {Count}", 
+                    businessAttributes.BusinessModel, productAnalysis.AllProducts.Count);
+
+                return (businessAttributes, productAnalysis);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in combined business attributes and menu extraction");
+                // Fallback to separate calls
+                var businessAttributes = await ExtractBusinessAttributesAsync(businessName, category, fullAddress, placeDetails);
+                var productAnalysis = await ExtractMenuWithGeoapifyDataAsync(placeDetails, businessName, category, fullAddress);
+                return (businessAttributes, productAnalysis);
+            }
+        }
+
+        // Combined method: Welcome Gift + Tiers in ONE POST call (for normal path)
+        public async Task<(WelcomeGiftResponse WelcomeGift, LoyaltyTierAnalysis TierAnalysis)> GenerateWelcomeGiftAndTiersCombinedAsync(
+            ProductAnalysisResult productAnalysis, 
+            ServiceAnalysisResult? serviceAnalysis, 
+            BusinessAttributes businessAttributes, 
+            decimal minimumSpent)
+        {
+            try
+            {
+                _logger.LogInformation("Generating welcome gift and tiers combined (1 API call)");
+
+                var products = string.Join(", ", productAnalysis.AllProducts.Select(p => $"{p.Name} (£{p.PriceGBP})"));
+                
+                // Build available items
+                var availableItems = new System.Text.StringBuilder();
+                if (productAnalysis?.AllProducts?.Any() == true)
+                {
+                    availableItems.AppendLine("AVAILABLE PRODUCTS:");
+                    foreach (var product in productAnalysis.AllProducts)
+                    {
+                        availableItems.AppendLine($"- {product.Name}: £{product.PriceGBP}");
+                    }
+                }
+
+                if (serviceAnalysis?.AllServices?.Any() == true)
+                {
+                    availableItems.AppendLine("\nAVAILABLE SERVICES:");
+                    foreach (var service in serviceAnalysis.AllServices)
+                    {
+                        availableItems.AppendLine($"- {service.Name}: £{service.PriceGBP}");
+                    }
+                }
+
+                var hasItems = availableItems.Length > 0;
+
+                // Combined prompt for Welcome Gift + All Tiers
+                var combinedPrompt = $@"Business: {businessAttributes.BusinessModel}
+Business Type: {businessAttributes.BusinessType}
+Core Offerings: {businessAttributes.CoreProductsOrServices}
+{(hasItems ? availableItems.ToString() : "NO SPECIFIC MENU ITEMS AVAILABLE")}
+Customer earns 1 token per £{minimumSpent} spent
+
+TASK 1: WELCOME GIFT
+CRITICAL CONSTRAINT: Welcome gift price MUST be ≤ £{minimumSpent} (the minimum spend per token).
+- This is a truly FREE gift (no purchase required)
+- Business cannot afford to give away items worth more than what a customer typically spends in one visit
+- If minimum spend is £{minimumSpent}, welcome gift should be ≤ £{minimumSpent} (ideally much less, like £3-5)
+
+Select the BEST welcome gift (truly free, no purchase required):
+- MUST be ≤ £{minimumSpent} (this is REQUIRED, not optional)
+- Ideally should be small/affordable (typically £3-5 or less)
+- Must be from the available products
+- Should create good first impression
+- If no products are ≤ £{minimumSpent}, select the cheapest available product
+
+TASK 2: LOYALTY TIERS
+CRITICAL PROFIT REQUIREMENT: Business must make minimum 75% profit margin on each tier reward
+Token count calculation: Token Count = Ceiling((Product Price × 4) ÷ £{minimumSpent})
+- This ensures: Total Customer Spend = Tokens × £{minimumSpent}
+- Business Profit = Total Customer Spend - Product Price
+- Profit Margin = (Profit ÷ Total Spend) × 100, must be ≥ 75%
+
+For each tier, select a product from the available menu and calculate the REQUIRED token count:
+- Bronze: Should be accessible (typically 2-4 tokens, but can be 1-5) - for customers who visit occasionally
+- Silver: Should be moderate (typically 4-7 tokens, but can be 3-8) - for regular customers  
+- Gold: Should be premium (typically 7-10 tokens, but can be 5-10) - for loyal, frequent customers
+- All token counts MUST be 10 or less
+- Token counts should be progressive (Bronze < Silver < Gold)
+
+RESPOND IN THIS EXACT FORMAT:
+WELCOME_GIFT:
+SELECTED: ProductName - £X.XX (MUST be ≤ £{minimumSpent})
+REASONING: [explain why, including why the price is affordable for the business]
+
+BRONZE_TIER:
+ITEM: ItemName1 - £X.XX
+CALCULATED_TOKENS: [calculate: Ceiling((Item Price × 4) ÷ £{minimumSpent})]
+TOTAL_CUSTOMER_SPEND: [Tokens × £{minimumSpent}]
+PROFIT: [Total Spend - Item Price]
+PROFIT_MARGIN: [Profit ÷ Total Spend × 100]% (must be ≥ 75%)
+CAN_BE_FREE: YES/NO
+REASONING: [explanation including profit calculation and why this works for the business]
+
+SILVER_TIER:
+ITEM: ItemName1 - £X.XX
+CALCULATED_TOKENS: [calculate: Ceiling((Item Price × 4) ÷ £{minimumSpent}), must be > Bronze tokens]
+TOTAL_CUSTOMER_SPEND: [Tokens × £{minimumSpent}]
+PROFIT: [Total Spend - Item Price]
+PROFIT_MARGIN: [Profit ÷ Total Spend × 100]% (must be ≥ 75%)
+CAN_BE_FREE: YES/NO
+REASONING: [explanation including profit calculation and why this works for the business]
+
+GOLD_TIER:
+ITEM: ItemName1 - £X.XX
+CALCULATED_TOKENS: [calculate: Ceiling((Item Price × 4) ÷ £{minimumSpent}), must be > Silver tokens]
+TOTAL_CUSTOMER_SPEND: [Tokens × £{minimumSpent}]
+PROFIT: [Total Spend - Item Price]
+PROFIT_MARGIN: [Profit ÷ Total Spend × 100]% (must be ≥ 75%)
+CAN_BE_FREE: YES/NO
+REASONING: [explanation including profit calculation and why this works for the business]";
+
+                var response = await GeneratePromptAsync(combinedPrompt);
+                
+                // Parse Welcome Gift
+                var welcomeGift = ParseWelcomeGiftFromResponse(response, productAnalysis, minimumSpent);
+                
+                // Parse Tiers (reuse existing parsing logic from GenerateAllTiersCombinedAsync)
+                var tierAnalysis = new LoyaltyTierAnalysis
+                {
+                    MinimumSpendForToken = minimumSpent,
+                    TierRewards = new List<LoyaltyTierReward>(),
+                    HasFreeItemOptions = hasItems
+                };
+
+                // Parse token counts
+                var bronzeTokensMatch = Regex.Match(response, @"BRONZE_TIER:.*?CALCULATED_TOKENS:\s*(\d+)", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+                var silverTokensMatch = Regex.Match(response, @"SILVER_TIER:.*?CALCULATED_TOKENS:\s*(\d+)", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+                var goldTokensMatch = Regex.Match(response, @"GOLD_TIER:.*?CALCULATED_TOKENS:\s*(\d+)", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+                
+                var bronzeTokens = bronzeTokensMatch.Success && int.TryParse(bronzeTokensMatch.Groups[1].Value, out var b) ? b : 0;
+                var silverTokens = silverTokensMatch.Success && int.TryParse(silverTokensMatch.Groups[1].Value, out var s) ? s : 0;
+                var goldTokens = goldTokensMatch.Success && int.TryParse(goldTokensMatch.Groups[1].Value, out var g) ? g : 0;
+
+                // Parse items and create tier rewards (simplified - reuse logic from GenerateAllTiersCombinedAsync)
+                // For now, use the existing GenerateAllTiersCombinedAsync logic by calling it
+                // But we already have the response, so we should parse it directly
+                // Let me use a simpler approach - call the existing method but it will make another API call
+                // Actually, we should parse the tiers from the combined response
+                
+                // For simplicity, let's parse what we can and fallback to calling the existing method if needed
+                // But that defeats the purpose. Let me parse the tiers properly from the response.
+                
+                // Extract tier items and create rewards
+                var bronzeItemMatch = Regex.Match(response, @"BRONZE_TIER:.*?ITEM:\s*([^-]+)\s*-\s*£?([\d.]+)", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+                var silverItemMatch = Regex.Match(response, @"SILVER_TIER:.*?ITEM:\s*([^-]+)\s*-\s*£?([\d.]+)", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+                var goldItemMatch = Regex.Match(response, @"GOLD_TIER:.*?ITEM:\s*([^-]+)\s*-\s*£?([\d.]+)", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+                if (bronzeItemMatch.Success && decimal.TryParse(bronzeItemMatch.Groups[2].Value, out var bronzePrice) && bronzeTokens > 0)
+                {
+                    tierAnalysis.TierRewards.Add(CreateTierRewardFromParsed(LoyaltyTier.Bronze, bronzeTokens, bronzeItemMatch.Groups[1].Value.Trim(), bronzePrice, minimumSpent, response));
+                }
+                if (silverItemMatch.Success && decimal.TryParse(silverItemMatch.Groups[2].Value, out var silverPrice) && silverTokens > 0)
+                {
+                    tierAnalysis.TierRewards.Add(CreateTierRewardFromParsed(LoyaltyTier.Silver, silverTokens, silverItemMatch.Groups[1].Value.Trim(), silverPrice, minimumSpent, response));
+                }
+                if (goldItemMatch.Success && decimal.TryParse(goldItemMatch.Groups[2].Value, out var goldPrice) && goldTokens > 0)
+                {
+                    tierAnalysis.TierRewards.Add(CreateTierRewardFromParsed(LoyaltyTier.Gold, goldTokens, goldItemMatch.Groups[1].Value.Trim(), goldPrice, minimumSpent, response));
+                }
+
+                // If parsing failed, fallback to calling existing method (but that adds another API call)
+                if (tierAnalysis.TierRewards.Count < 3)
+                {
+                    _logger.LogWarning("Failed to parse all tiers from combined response, using fallback");
+                    var fallbackTiers = await GenerateAllTiersCombinedAsync(businessAttributes, productAnalysis, serviceAnalysis, minimumSpent);
+                    tierAnalysis = fallbackTiers;
+                }
+
+                _logger.LogInformation("Combined generation complete - Welcome Gift: {Gift}, Tiers: {TierCount}", 
+                    welcomeGift.ItemName, tierAnalysis.TierRewards.Count);
+
+                return (welcomeGift, tierAnalysis);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error generating combined welcome gift and tiers");
+                // Fallback to separate calls
+                var welcomeGift = await GenerateWelcomeGiftAsync(productAnalysis, serviceAnalysis, businessAttributes, minimumSpent);
+                var tierAnalysis = await GenerateAllTiersCombinedAsync(businessAttributes, productAnalysis, serviceAnalysis, minimumSpent);
+                return (welcomeGift, tierAnalysis);
+            }
+        }
+
+        private LoyaltyTierReward CreateTierRewardFromParsed(LoyaltyTier tier, int tokens, string itemName, decimal itemPrice, decimal minimumSpent, string response)
+        {
+            var totalSpend = tokens * minimumSpent;
+            var profit = totalSpend - itemPrice;
+            var profitMargin = (profit / totalSpend) * 100;
+
+            // Extract reasoning from response
+            var tierName = tier.ToString().ToUpper();
+            var nextTierName = tier == LoyaltyTier.Bronze ? "SILVER" : tier == LoyaltyTier.Silver ? "GOLD" : "WELCOME";
+            var reasoningPattern = $@"{tierName}_TIER:.*?REASONING:\s*(.+?)(?:\n(?:{nextTierName}_TIER:|$))";
+            var reasoningMatch = Regex.Match(response, reasoningPattern, RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            var reasoning = reasoningMatch.Success ? reasoningMatch.Groups[1].Value.Trim() : $"{tier} tier: {tokens} tokens for {itemName}";
+
+            return new LoyaltyTierReward
+            {
+                Tier = tier,
+                RequiredTokens = tokens,
+                RewardOptions = new List<TierRewardOption>
+                {
+                    new TierRewardOption
+                    {
+                        ItemName = itemName,
+                        ItemValueGBP = itemPrice,
+                        CanBeGivenFree = profitMargin >= 75,
+                        TotalCustomerSpend = totalSpend,
+                        BusinessProfit = profit,
+                        ProfitMarginPercentage = profitMargin,
+                        ReasoningForSelection = reasoning
+                    }
+                },
+                Reasoning = reasoning
+            };
         }
     }
 }

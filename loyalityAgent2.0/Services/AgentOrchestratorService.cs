@@ -71,75 +71,16 @@ namespace loyalityAgent2._0.Services
 
                     await BroadcastProgressAsync(connectionId, "GEOAPIFY_FOUND", $"Found business: {placeDetails.Name}");
 
-                    // Extract business attributes (pass Geoapify data for faster, more accurate search)
-                    businessAttributes = await _geminiService.ExtractBusinessAttributesAsync(businessName, category, fullAddress, placeDetails);
+                    // Extract business attributes and menu combined (1 API call instead of 2)
+                    await BroadcastProgressAsync(connectionId, "EXTRACT_ATTRIBUTES_AND_MENU", "Extracting business attributes and menu (combined)...");
+                    var combinedResult = await _geminiService.ExtractBusinessAttributesAndMenuCombinedAsync(placeDetails, businessName, category, fullAddress);
+                    businessAttributes = combinedResult.BusinessAttributes;
+                    productAnalysis = combinedResult.ProductAnalysis;
 
-                    // STEP 2: Try to find website if not provided by Geoapify
-                    string? websiteUrl = placeDetails.Website;
-                    
-                    if (string.IsNullOrEmpty(websiteUrl))
-                    {
-                        _logger.LogInformation("Website not found in Geoapify, searching for website URL...");
-                        await BroadcastProgressAsync(connectionId, "SEARCH_WEBSITE", 
-                            "Searching for business website...");
-                        
-                        // Try to find website using business name
-                        websiteUrl = await FindWebsiteUrlAsync(businessName, fullAddress);
-                        
-                        if (!string.IsNullOrEmpty(websiteUrl))
-                        {
-                            _logger.LogInformation("Found website via search: {Website}", websiteUrl);
-                            placeDetails.Website = websiteUrl; // Update placeDetails for future use
-                        }
-                    }
-
-                    // STEP 3: Try website scraping first (if website available)
-                    if (!string.IsNullOrEmpty(websiteUrl))
-                    {
-                        await BroadcastProgressAsync(connectionId, "SCRAPE_WEBSITE", 
-                            $"Scraping menu from website: {websiteUrl}");
-
-                        productAnalysis = await _menuScraperService.ScrapeMenuFromWebsiteAsync(
-                            websiteUrl, businessName, category);
-
-                        if (productAnalysis.AllProducts.Count >= 3)
-                        {
-                            // ✅ Success: Real menu from website
-                            _logger.LogInformation("Successfully scraped {Count} menu items from website", 
-                                productAnalysis.AllProducts.Count);
-                            workflowPath = "Geoapify → Website Scraping → Real Menu";
-                            dataSource = "Geoapify + Website Scraping";
-                            await BroadcastProgressAsync(connectionId, "SCRAPE_SUCCESS", 
-                                $"Successfully extracted {productAnalysis.AllProducts.Count} menu items from website");
-                        }
-                        else
-                        {
-                            // ❌ Scraping failed or insufficient items - fallback to AI
-                            _logger.LogInformation("Website scraping found {Count} items, falling back to AI extraction", 
-                                productAnalysis.AllProducts.Count);
-                            await BroadcastProgressAsync(connectionId, "SCRAPE_FAILED", 
-                                "Website scraping found insufficient items, using AI extraction...");
-
-                            productAnalysis = await _geminiService.ExtractMenuWithGeoapifyDataAsync(
-                                placeDetails, businessName, category, fullAddress);
-
-                            workflowPath = "Geoapify → Website Scraping Failed → AI Extraction";
-                            dataSource = "Geoapify + AI Extraction";
-                        }
-                    }
-                    else
-                    {
-                        // ❌ No website available - use AI extraction
-                        _logger.LogInformation("No website available, using AI extraction");
-                        await BroadcastProgressAsync(connectionId, "NO_WEBSITE", 
-                            "No website available, using AI extraction...");
-
-                        productAnalysis = await _geminiService.ExtractMenuWithGeoapifyDataAsync(
-                            placeDetails, businessName, category, fullAddress);
-
-                        workflowPath = "Geoapify → No Website → AI Extraction";
-                        dataSource = "Geoapify + AI Extraction";
-                    }
+                    // Note: Combined method already extracted menu, so we skip website scraping for now
+                    // (Can add website scraping as optimization later if needed)
+                    workflowPath = "Geoapify → Combined Attributes + Menu";
+                    dataSource = "Geoapify + Combined AI Extraction";
                 }
                 else
                 {
@@ -147,9 +88,15 @@ namespace loyalityAgent2._0.Services
                     _logger.LogInformation("Business not found in Geoapify, searching web platforms...");
                     await BroadcastProgressAsync(connectionId, "GEOAPIFY_NOT_FOUND", "Business not found in Geoapify, searching web platforms...");
 
-                    // STEP 2: Web Search (Uber/TripAdvisor/Google)
-                    await BroadcastProgressAsync(connectionId, "WEB_SEARCH", "Searching web platforms (Google, Uber, TripAdvisor)...");
-                    var webSearchResult = await _geminiService.SearchBusinessOnWebPlatformsAsync(businessName, fullAddress);
+                    // STEP 2: Combined Web Search + Extract All (reduces 4 POST calls to 1 POST)
+                    await BroadcastProgressAsync(connectionId, "WEB_SEARCH_AND_EXTRACT", "Searching web platforms and extracting all data (combined)...");
+                    var combinedWebResult = await _geminiService.SearchBusinessAndExtractAllCombinedAsync(
+                        businessName, category, fullAddress, minimumSpent);
+
+                    var webSearchResult = combinedWebResult.WebSearchResult;
+                    businessAttributes = combinedWebResult.BusinessAttributes;
+                    productAnalysis = combinedWebResult.ProductAnalysis;
+                    serviceAnalysis = combinedWebResult.ServiceAnalysis; // Already analyzed if service/hybrid
 
                     if (webSearchResult.Found)
                     {
@@ -191,6 +138,9 @@ namespace loyalityAgent2._0.Services
                             await BroadcastProgressAsync(connectionId, "GENERATE_UNIQUE", "Generating unique suggestions based on similar business...");
                             productAnalysis = await _geminiService.GenerateUniqueFromSimilarBusinessAsync(
                                 businessName, category, fullAddress, similarBusinessData, minimumSpent);
+                            
+                            // Reset service analysis since we're using similar business data
+                            serviceAnalysis = null;
                         }
                         else
                         {
@@ -212,15 +162,6 @@ namespace loyalityAgent2._0.Services
                             workflowPath = "Geoapify → Web Search → Fallback Discount";
 
                             await BroadcastProgressAsync(connectionId, "FALLBACK_DISCOUNT", "Using discount-only rewards (real business found but no similar in database)...");
-
-                            // Extract business attributes from web search
-                            businessAttributes = await _geminiService.ExtractBusinessAttributesFromWebSearchAsync(
-                                webSearchResult, businessName, category, fullAddress);
-
-                            // Extract products from web search (real menu items)
-                            await BroadcastProgressAsync(connectionId, "EXTRACT_PRODUCTS_WEB", "Extracting products from web search data...");
-                            productAnalysis = await _geminiService.ExtractProductsFromWebSearchAsync(
-                                webSearchResult, businessName, category, fullAddress);
                         }
                     }
                     else
@@ -238,37 +179,43 @@ namespace loyalityAgent2._0.Services
 
                         // Generate category-based products
                         productAnalysis = await _geminiService.GenerateCategoryBasedProductsAsync(businessName, category, fullAddress, minimumSpent);
+                        
+                        // Reset service analysis
+                        serviceAnalysis = null;
                     }
                 }
 
-                // STEP 3: Analyze Services (if needed)
-                if (businessAttributes.BusinessType == BusinessType.Service || businessAttributes.BusinessType == BusinessType.Hybrid)
+                // STEP 3: Analyze Services (if needed and not already analyzed in combined call)
+                if (serviceAnalysis == null && (businessAttributes.BusinessType == BusinessType.Service || businessAttributes.BusinessType == BusinessType.Hybrid))
                 {
                     await BroadcastProgressAsync(connectionId, "ANALYZE_SERVICES", "Analyzing services...");
                     serviceAnalysis = await _geminiService.AnalyzeServicesAsync(businessAttributes, minimumSpent);
                 }
 
-                // STEP 4: Generate Welcome Gift (always)
-                await BroadcastProgressAsync(connectionId, "GENERATE_WELCOME_GIFT", "Generating welcome gift...");
-                var welcomeGift = await _geminiService.GenerateWelcomeGiftAsync(productAnalysis, serviceAnalysis, businessAttributes, minimumSpent);
-                welcomeGift.DataSource = dataSource;
-
-                // STEP 5: Generate All 3 Tiers Combined (10s)
-                await BroadcastProgressAsync(connectionId, "GENERATE_TIERS", "Generating loyalty tiers (Bronze, Silver, Gold)...");
-                
+                // STEP 4 & 5: Generate Welcome Gift + Tiers Combined (reduced to 1 API call)
+                WelcomeGiftResponse welcomeGift;
                 LoyaltyTierAnalysis tierAnalysis;
-                // Use discount-only tiers if we're in fallback discount mode
+                
+                // Use combined method to reduce API calls (2 POST → 1 POST)
                 if (dataSource == "Web Search → Fallback Discount")
                 {
-                    // Pass similar business data if available (for discount reference)
-                    tierAnalysis = await _geminiService.GenerateDiscountOnlyTiersAsync(
-                        businessAttributes, productAnalysis, serviceAnalysis, minimumSpent, similarBusinessData);
+                    await BroadcastProgressAsync(connectionId, "GENERATE_WELCOME_GIFT_AND_TIERS", "Generating welcome gift and loyalty tiers (combined)...");
+                    var combinedResult = await _geminiService.GenerateWelcomeGiftAndDiscountTiersCombinedAsync(
+                        productAnalysis, serviceAnalysis, businessAttributes, minimumSpent, similarBusinessData);
+                    welcomeGift = combinedResult.WelcomeGift;
+                    tierAnalysis = combinedResult.TierAnalysis;
                 }
                 else
                 {
-                    tierAnalysis = await _geminiService.GenerateAllTiersCombinedAsync(
-                        businessAttributes, productAnalysis, serviceAnalysis, minimumSpent);
+                    // Normal path: Use combined method (2 POST → 1 POST)
+                    await BroadcastProgressAsync(connectionId, "GENERATE_WELCOME_GIFT_AND_TIERS", "Generating welcome gift and loyalty tiers (combined)...");
+                    var combinedResult = await _geminiService.GenerateWelcomeGiftAndTiersCombinedAsync(
+                        productAnalysis, serviceAnalysis, businessAttributes, minimumSpent);
+                    welcomeGift = combinedResult.WelcomeGift;
+                    tierAnalysis = combinedResult.TierAnalysis;
                 }
+                
+                welcomeGift.DataSource = dataSource;
 
                 // Ensure all tiers are filled
                 EnsureAllTiersFilled(tierAnalysis, minimumSpent);

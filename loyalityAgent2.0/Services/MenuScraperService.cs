@@ -2,6 +2,7 @@ using loyalityAgent2._0.Models;
 using System.Text.RegularExpressions;
 using System.Net;
 using System.Text;
+using System.Linq;
 
 namespace loyalityAgent2._0.Services
 {
@@ -57,32 +58,28 @@ namespace loyalityAgent2._0.Services
                     }
                 }
 
-                // Approach 2: Try menu page if main page didn't work
+                // Approach 2: Intelligently find menu page using AI (no hardcoded names)
                 if (menuItems == null || menuItems.AllProducts.Count < 3)
                 {
-                    _logger.LogInformation("Trying to find and fetch menu page...");
-                    var menuUrls = new[]
+                    _logger.LogInformation("Using AI to find menu page from actual links on the page...");
+                    
+                    // Use AI to find menu page URLs from the HTML (discovers any custom naming)
+                    var potentialMenuUrls = await FindMenuPagesWithAIAsync(htmlContent, normalizedUrl, businessName, category);
+                    
+                    foreach (var menuUrl in potentialMenuUrls)
                     {
-                        normalizedUrl.TrimEnd('/') + "/menu",
-                        normalizedUrl.TrimEnd('/') + "/Menu",
-                        normalizedUrl.TrimEnd('/') + "/MENU",
-                        normalizedUrl.TrimEnd('/') + "/food-menu",
-                        normalizedUrl.TrimEnd('/') + "/food"
-                    };
-
-                    foreach (var menuUrl in menuUrls)
-                    {
-                        _logger.LogInformation("Trying menu URL: {MenuUrl}", menuUrl);
+                        _logger.LogInformation("Trying AI-identified menu URL: {MenuUrl}", menuUrl);
                         var menuHtml = await FetchWebsiteHtmlAsync(menuUrl);
                         if (!string.IsNullOrEmpty(menuHtml))
                         {
                             var menuResult = await ExtractMenuItemsFromHtmlAsync(menuHtml, businessName, category, menuUrl);
-                            if (menuResult.AllProducts.Count > menuItems?.AllProducts.Count)
+                            if (menuResult.AllProducts.Count > (menuItems?.AllProducts.Count ?? 0))
                             {
                                 menuItems = menuResult;
                                 if (menuItems.AllProducts.Count >= 3)
                                 {
-                                    _logger.LogInformation("Successfully extracted {Count} items from menu page", menuItems.AllProducts.Count);
+                                    _logger.LogInformation("Successfully extracted {Count} items from menu page: {MenuUrl}", 
+                                        menuItems.AllProducts.Count, menuUrl);
                                     return menuItems;
                                 }
                             }
@@ -208,7 +205,7 @@ namespace loyalityAgent2._0.Services
                 }
 
                 // Use Gemini with Google Search grounding for better extraction
-                var prompt = $@"Extract COMPLETE menu items and prices from this restaurant website.
+                var prompt = $@"Extract COMPLETE products/services and prices from this business website.
 
 Business: {businessName}
 Category: {category}
@@ -217,15 +214,16 @@ Website: {websiteUrl}
 HTML Content (first 100KB):
 {cleanedHtml.Substring(0, Math.Min(100000, cleanedHtml.Length))}
 
-TASK: Extract EVERY SINGLE menu item with prices from the HTML.
-- Look for ALL menu sections (CHAATS, INDIAN BREAD, LUNCH, RICE, NOODLES, STARTERS, SOUPS, SOUTH INDIAN, SNACKS, SIDE DISHES, DESSERTS, DRINKS, APPETIZERS, MAIN COURSES, etc.)
+TASK: Extract EVERY SINGLE product/service item with prices from the HTML.
+- Look for ALL product/service categories/sections (whatever categories this business uses - could be food items, retail products, services, packages, treatments, classes, memberships, etc.)
 - Extract item names EXACTLY as they appear in HTML
 - Extract prices EXACTLY as they appear, then convert to GBP (£)
 - Look for price patterns: Rs., $, £, €, numbers with currency symbols, price tags
 - Search through ALL HTML content systematically - don't miss any items
 - Include items from EVERY category/section you find
 
-CURRENCY CONVERSION:
+CURRENCY CONVERSION (convert all prices to GBP £):
+- GBP (British Pounds): Already in GBP - use as-is (e.g., £10.00 = £10.00)
 - LKR (Sri Lankan Rupees): 1 GBP ≈ 400 LKR (e.g., Rs. 800 = £2.00)
 - USD: 1 GBP ≈ 1.25 USD (e.g., $10 = £8.00)
 - EUR: 1 GBP ≈ 1.15 EUR (e.g., €10 = £8.70)
@@ -233,10 +231,10 @@ CURRENCY CONVERSION:
 
 CRITICAL REQUIREMENTS:
 - Extract items that are ACTUALLY in the HTML (not invented)
-- Include items from ALL menu categories/sections
+- Include items from ALL product/service categories/sections
 - List EVERY item you find - be thorough and comprehensive
-- If you see menu sections but no prices, still list the items (estimate reasonable prices based on category)
-- If no menu items found at all, respond with: NO_MENU_FOUND
+- If you see product/service sections but no prices, still list the items (estimate reasonable prices based on category and business type)
+- If no products/services found at all, respond with: NO_MENU_FOUND
 
 Format (list ALL items, be comprehensive):
 PRODUCTS: Item1 - £X.XX, Item2 - £Y.YY, Item3 - £Z.ZZ, Item4 - £A.AA, Item5 - £B.BB, [continue listing ALL items from ALL sections]
@@ -249,18 +247,18 @@ RECOMMENDED_FREE: ItemName - £Z.ZZ (smallest/cheapest item, typically under £5
                 {
                     _logger.LogInformation("HTML seems minimal or JavaScript-rendered, using Google Search for menu");
                     // Use Google Search grounding to find menu from web
-                    var searchPrompt = $@"Search Google for the menu of this restaurant:
+                    var searchPrompt = $@"Search Google for the products/services and prices of this business:
 
 Business: {businessName}
 Website: {websiteUrl}
 Category: {category}
 
-Find the complete menu with prices. Look for:
-- Menu items from all sections (CHAATS, INDIAN BREAD, LUNCH, RICE, NOODLES, STARTERS, SOUPS, etc.)
-- Prices in any currency (convert to GBP: 1 GBP ≈ 400 LKR, 1 GBP ≈ 1.25 USD)
-- All available dishes and their prices
+Find the complete products/services with prices. Look for:
+- All products/services from all categories/sections (whatever this business offers - food items, retail products, services, packages, treatments, classes, etc.)
+- Prices in any currency (convert to GBP: GBP as-is, 1 GBP ≈ 400 LKR, 1 GBP ≈ 1.25 USD, 1 GBP ≈ 1.15 EUR)
+- All available items and their prices
 
-Extract ALL menu items with prices.
+Extract ALL products/services with prices.
 
 Format:
 PRODUCTS: Product1 - £X.XX, Product2 - £Y.YY, Product3 - £Z.ZZ
@@ -358,30 +356,32 @@ RECOMMENDED_FREE: ProductName - £Z.ZZ";
             {
                 _logger.LogInformation("Extracting menu using Google Search for: {BusinessName}", businessName);
 
-                var prompt = $@"Search Google for the COMPLETE menu of this restaurant:
+                var prompt = $@"Search Google for the COMPLETE products/services and prices of this business:
 
 Business: {businessName}
 Website: {websiteUrl}
 Category: {category}
 
-Find the COMPLETE menu with EVERY item and price. Search:
+Find the COMPLETE products/services with EVERY item and price. Search:
 - The website {websiteUrl} directly
 - Google Business listing
-- Menu pages, PDFs, or images
-- Review sites that mention menu items
+- Product/service pages, PDFs, or images
+- Review sites that mention products/services
 
 Extract:
-- Menu items from ALL sections (CHAATS, INDIAN BREAD, LUNCH, RICE, NOODLES, STARTERS, SOUPS, SOUTH INDIAN, SNACKS, SIDE DISHES, DESSERTS, DRINKS, APPETIZERS, MAIN COURSES, etc.)
-- Prices in any currency - convert to GBP (£)
-  - LKR (Sri Lankan Rupees): 1 GBP ≈ 400 LKR
-  - USD: 1 GBP ≈ 1.25 USD
-  - EUR: 1 GBP ≈ 1.15 EUR
-- Extract EVERY available dish with prices
+- Products/services from ALL categories/sections (whatever this business offers - food items, retail products, services, packages, treatments, classes, memberships, etc.)
+- Prices in any currency - convert to GBP (£):
+  - GBP (British Pounds): Already in GBP - use as-is (e.g., £10.00 = £10.00)
+  - LKR (Sri Lankan Rupees): 1 GBP ≈ 400 LKR (e.g., Rs. 800 = £2.00)
+  - USD: 1 GBP ≈ 1.25 USD (e.g., $10 = £8.00)
+  - EUR: 1 GBP ≈ 1.15 EUR (e.g., €10 = £8.70)
+  - If no currency symbol, assume GBP if UK business, LKR if Sri Lankan
+- Extract EVERY available product/service with prices
 - Be thorough - don't miss any items
 
 CRITICAL:
-- Extract items that are ACTUALLY on the menu (from real sources)
-- Include items from ALL menu categories/sections
+- Extract items that are ACTUALLY offered by this business (from real sources)
+- Include items from ALL product/service categories/sections
 - Convert all prices to GBP (£)
 - List as MANY items as possible - be comprehensive
 
@@ -699,6 +699,196 @@ RECOMMENDED_FREE: ItemName - £Z.ZZ (smallest/cheapest item, typically under £5
                 return result; // Return original if validation fails
             }
         }
+
+        private async Task<List<string>> FindMenuPagesWithAIAsync(string htmlContent, string baseUrl, string businessName, string category)
+        {
+            var menuUrls = new List<string>();
+            
+            try
+            {
+                _logger.LogInformation("Extracting all links from HTML to find menu pages...");
+                
+                // Step 1: Extract all links from HTML
+                var allLinks = ExtractAllLinksFromHtml(htmlContent, baseUrl);
+                _logger.LogInformation("Found {Count} links on the page", allLinks.Count);
+                
+                if (allLinks.Count == 0)
+                {
+                    _logger.LogWarning("No links found on the page");
+                    return menuUrls;
+                }
+                
+                // Step 2: Use AI to identify which links are likely menu pages
+                var linkAnalysisPrompt = $@"Analyze these website links and identify which ones are MOST LIKELY to contain menu items, food listings, or product catalogs.
+
+Business: {businessName}
+Category: {category}
+Base URL: {baseUrl}
+
+Links found on the page:
+{string.Join("\n", allLinks.Take(50).Select((link, index) => $"{index + 1}. URL: {link.Url}\n   Link Text: \"{link.Text}\"\n   Title: \"{link.Title}\""))}
+
+TASK: Identify which links are MOST LIKELY to contain menu items, food listings, or product catalogs.
+Analyze the ACTUAL link text, URLs, and context to determine which pages would show what the business sells.
+Do NOT assume any specific naming patterns - analyze what's actually on the page.
+
+Return ONLY the URLs (one per line, full URLs) that are likely menu pages, ordered by likelihood (most likely first).
+If no links seem menu-related, return: NO_MENU_LINKS";
+
+                var aiResponse = await _geminiService.GeneratePromptAsync(linkAnalysisPrompt);
+                _logger.LogInformation("AI response for menu link identification: {Response}", aiResponse);
+                
+                // Parse AI response to get menu URLs
+                var lines = aiResponse.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(line => line.Trim())
+                    .Where(line => !string.IsNullOrEmpty(line) && 
+                                  !line.Contains("NO_MENU_LINKS", StringComparison.OrdinalIgnoreCase) &&
+                                  (line.StartsWith("http://") || line.StartsWith("https://") || line.StartsWith("/")))
+                    .ToList();
+                
+                foreach (var line in lines)
+                {
+                    var url = NormalizeMenuUrl(line, baseUrl);
+                    if (!string.IsNullOrEmpty(url) && !menuUrls.Contains(url, StringComparer.OrdinalIgnoreCase))
+                    {
+                        menuUrls.Add(url);
+                        _logger.LogInformation("AI identified potential menu page: {Url}", url);
+                    }
+                }
+                
+                // Step 3: Fallback - If AI didn't find any, use the existing FindMenuPageUrl method
+                if (menuUrls.Count == 0)
+                {
+                    _logger.LogInformation("AI didn't find menu links, trying regex-based search...");
+                    var fallbackUrl = FindMenuPageUrl(htmlContent, baseUrl);
+                    if (!string.IsNullOrEmpty(fallbackUrl))
+                    {
+                        menuUrls.Add(fallbackUrl);
+                    }
+                }
+                
+                _logger.LogInformation("Identified {Count} potential menu pages using AI", menuUrls.Count);
+                return menuUrls;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error using AI to find menu pages");
+                // Fallback to regex-based search
+                var fallbackUrl = FindMenuPageUrl(htmlContent, baseUrl);
+                if (!string.IsNullOrEmpty(fallbackUrl))
+                {
+                    menuUrls.Add(fallbackUrl);
+                }
+                return menuUrls;
+            }
+        }
+
+        private List<LinkInfo> ExtractAllLinksFromHtml(string html, string baseUrl)
+        {
+            var links = new List<LinkInfo>();
+            
+            try
+            {
+                // Extract all <a> tags with href
+                var linkPattern = @"<a\s+[^>]*href=[""']([^""']+)[""'][^>]*>(.*?)</a>";
+                var matches = Regex.Matches(html, linkPattern, RegexOptions.IgnoreCase | RegexOptions.Singleline);
+                
+                foreach (Match match in matches)
+                {
+                    if (match.Groups.Count >= 3)
+                    {
+                        var href = match.Groups[1].Value;
+                        var linkText = WebUtility.HtmlDecode(Regex.Replace(match.Groups[2].Value, @"<[^>]+>", "").Trim());
+                        
+                        // Extract title attribute if present
+                        var titleMatch = Regex.Match(match.Value, @"title=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
+                        var title = titleMatch.Success ? titleMatch.Groups[1].Value : string.Empty;
+                        
+                        // Skip empty links, javascript links, anchors, and mailto links
+                        if (string.IsNullOrEmpty(href) || 
+                            href.StartsWith("#") || 
+                            href.StartsWith("javascript:") || 
+                            href.StartsWith("mailto:") ||
+                            href.StartsWith("tel:"))
+                            continue;
+                        
+                        // Convert to absolute URL
+                        var absoluteUrl = ConvertToAbsoluteUrl(href, baseUrl);
+                        if (!string.IsNullOrEmpty(absoluteUrl) && 
+                            !links.Any(l => l.Url.Equals(absoluteUrl, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            links.Add(new LinkInfo
+                            {
+                                Url = absoluteUrl,
+                                Text = linkText,
+                                Title = title
+                            });
+                        }
+                    }
+                }
+                
+                _logger.LogInformation("Extracted {Count} unique links from HTML", links.Count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error extracting links from HTML");
+            }
+            
+            return links;
+        }
+
+        private string ConvertToAbsoluteUrl(string url, string baseUrl)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(url))
+                    return string.Empty;
+                
+                url = url.Trim();
+                
+                // Already absolute
+                if (url.StartsWith("http://") || url.StartsWith("https://"))
+                    return url;
+                
+                // Relative URL
+                var baseUri = new Uri(baseUrl);
+                if (url.StartsWith("/"))
+                {
+                    return $"{baseUri.Scheme}://{baseUri.Host}{url}";
+                }
+                else
+                {
+                    return new Uri(baseUri, url).ToString();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error converting URL to absolute: {Url}", url);
+                return string.Empty;
+            }
+        }
+
+        private string NormalizeMenuUrl(string url, string baseUrl)
+        {
+            if (string.IsNullOrEmpty(url))
+                return string.Empty;
+            
+            url = url.Trim();
+            
+            // If it's already absolute, return as-is
+            if (url.StartsWith("http://") || url.StartsWith("https://"))
+                return url;
+            
+            // Convert relative to absolute
+            return ConvertToAbsoluteUrl(url, baseUrl);
+        }
+
+        // Helper class for link information
+        private class LinkInfo
+        {
+            public string Url { get; set; } = string.Empty;
+            public string Text { get; set; } = string.Empty;
+            public string Title { get; set; } = string.Empty;
+        }
     }
 }
-
