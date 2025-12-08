@@ -971,8 +971,13 @@
         let userId = null;
         let userEmail = null;
 
+        // Set to true for production, false for localhost
+        const loyatyLive = true;
+        const LOCALHOST_URL = "https://localhost:7277";
+        const PRODUCTION_URL = "https://rashmiloyalyagent.runasp.net";
+
         function getBaseUrl() {
-            return "https://localhost:7277";
+            return loyatyLive ? PRODUCTION_URL : LOCALHOST_URL;
         }
 
         function initApp() {
